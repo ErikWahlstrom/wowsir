@@ -17,6 +17,7 @@
   <ul id="list" role="list" aria-label="Long list"></ul>
   <button id="ask">Ask name</button>
   <p id="answer"></p>
+  <button id="warn">Old API</button>
   <a href="login.html?bye=1" id="out">Log out</a>
 </main>
 <script>
@@ -38,5 +39,6 @@
   const ul = document.getElementById('list');
   for (let i = 1; i <= 50; i++) { const li = document.createElement('li'); li.textContent = 'Row ' + i; ul.append(li); }
   document.getElementById('ask').onclick = () => (document.getElementById('answer').textContent = 'Hello, ' + prompt('Your name?'));
+  document.getElementById('warn').onclick = () => { console.warn('oldApi() is deprecated, use newApi()'); console.warn('second warning'); };
 </script>
 </body></html>

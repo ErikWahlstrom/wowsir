@@ -378,6 +378,9 @@ impl Session {
         for e in events {
             t.push_str(&format!("\n! {e}"));
         }
+        if let Some(w) = self.warnings_line() {
+            t.push_str(&format!("\n{w}"));
+        }
         if unauthorized && !self.warned_401 {
             self.warned_401 = true;
             let page = if head.starts_with("open ") { self.last_open.clone() } else { url.clone() };

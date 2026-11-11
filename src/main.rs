@@ -58,7 +58,7 @@ MCP        wowsir mcp   (stdio MCP server: tools `browser` + `browser_run`, same
            add to Claude Code: claude mcp add --scope user wowsir -- wowsir mcp
 GLOBAL     -q quiet (no diff) · --snap full snapshot after actions · --timeout MS · --headed · --no-auth
 After each action wowsir waits for the page to settle (network + DOM quiet), then prints:
-  ok <action> · <ms>   then  → new url,  ! console/network errors/dialogs,  ~ diff of the page (+ added, - removed)
+  ok <action> · <ms>   then  → new url,  ! console/network errors/dialogs,  · console.warn summary,  ~ diff of the page (+ added, - removed)
 "#;
 
 fn main() {

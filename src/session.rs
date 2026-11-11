@@ -119,6 +119,8 @@ pub struct State {
     pub world: Option<i64>,
     /// cross-origin iframes and workers attached under this page (their own CDP sessions)
     pub children: Vec<Child>,
+    /// console.warn messages since the last action report
+    pub warnings: Vec<String>,
     /// wowsir's isolated world per cross-origin frame: frame id -> (session id, context id)
     pub frame_worlds: HashMap<String, (String, i64)>,
     /// the page has shown a cross-origin iframe: route lookups into frames too
@@ -148,6 +150,7 @@ impl State {
             doc_seq: 0,
             world: None,
             children: vec![],
+            warnings: vec![],
             frame_worlds: HashMap::new(),
             xframes: false,
             dialog_accept: true,
@@ -977,6 +980,14 @@ impl Session {
         switched
     }
 
+    /// One line for console.warn calls since the last report: the first one, plus a count.
+    pub fn warnings_line(&self) -> Option<String> {
+        let w = std::mem::take(&mut self.st.lock().unwrap().warnings);
+        let first = w.first()?;
+        let more = if w.len() > 1 { format!(" (+{} more: `wowsir console`)", w.len() - 1) } else { String::new() };
+        Some(format!("· console.warn: {first}{more}"))
+    }
+
     pub fn drain_events(&self) -> Vec<String> {
         std::mem::take(&mut self.st.lock().unwrap().events)
     }
@@ -1186,6 +1197,12 @@ async fn event_loop(
                 }
                 if ty == "error" || ty == "assert" {
                     s.note_error_in(&lab, format!("console.error: {}", clip(&text, 300)));
+                } else if ty == "warning" && s.warnings.len() < 100 {
+                    let w = match &lab {
+                        Some(l) => format!("{} (in {l})", clip(&text, 160)),
+                        None => clip(&text, 160),
+                    };
+                    s.warnings.push(w);
                 }
             }
             "Log.entryAdded" => {

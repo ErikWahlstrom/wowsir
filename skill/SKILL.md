@@ -23,6 +23,7 @@ When a sign-in is needed, run `wowsir login <protected-page-url>` with run_in_ba
    - `ok …` means the action succeeded. `FAIL …` means it didn't, and the output includes the reason and the current interactive elements.
    - `→ url` means the action navigated.
    - `! …` lines are console errors, uncaught exceptions, failed or 4xx/5xx requests, and dialogs. Treat them as bugs to report.
+   - `· console.warn: …` summarizes warnings the page logged (deprecations, React key warnings…): worth a look, not necessarily bugs.
    - `~ N changed:` is followed by `+`/`-` lines: what appeared or disappeared on the page.
 4. Assert with `wowsir expect text "Welcome"`, `wowsir expect url /dashboard`, or `wowsir expect no-errors`. Exit code 1 means failure.
 

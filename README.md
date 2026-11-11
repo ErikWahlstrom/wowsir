@@ -36,7 +36,7 @@ Agents that test websites spend most of their tokens and round-trips on two thin
 
 - **Every action reports its own result.** After a click or fill, wowsir waits until the page settles, then returns:
   - the new URL;
-  - console errors, uncaught exceptions, failed or 4xx/5xx requests, and dialogs;
+  - console errors, uncaught exceptions, failed or 4xx/5xx requests, and dialogs (plus a one-line summary of console warnings);
   - a diff of the page against what the agent last saw.
 
   The agent doesn't need to re-snapshot after every step.
