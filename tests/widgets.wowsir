@@ -19,3 +19,6 @@ expect text 'Hello, Ada'
 click 'link:Log out'
 expect url login.html
 expect no-errors
+theme dark
+eval if (!matchMedia('(prefers-color-scheme: dark)').matches) throw new Error('theme dark not applied')
+theme off

@@ -15,7 +15,7 @@ Commands:
   click T [--mod|--shift] | fill T TEXT | type [T] TEXT | press KEY (Enter, Control+a) | select T OPTION | check T | uncheck T | hover T | scroll [down|up|T] | scroll T down|PX (inside it) | upload T FILE
   wait text TEXT | wait gone T | wait url PART
   expect text|no-text TEXT | expect url PART | expect visible|hidden T | expect value T V | expect count T N | expect no-errors
-  text [T] | console [--errors] | net [--failed] | net --body PATTERN | errors | eval JS | screenshot [PATH] | viewport W H | viewport mobile
+  text [T] | console [--errors] | net [--failed] | net --body PATTERN | errors | eval JS | screenshot [PATH] | viewport W H | viewport mobile | theme dark|light
   watch T... (then actions report "! moved:/jumped:") | expect still | screenshot --mark
   mock PATTERN 500|abort [--json X] [--delay MS] | mock off
   run FILE... [--parallel N] | record save FILE | logout SITE | login URL (opens a window for the human to sign in; only when wowsir says sign-in is needed)

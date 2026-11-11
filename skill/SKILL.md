@@ -77,6 +77,7 @@ Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by o
 - Debugging: `wowsir console --errors`, `wowsir net --failed`, `wowsir net --api`, `wowsir net --body /api/items` (response body of the latest matching request), `wowsir errors`, `wowsir eval "window.store.state"` (runs in the page's main world). For longer scripts, or to avoid quoting trouble, write the JavaScript to a file and run `wowsir eval --file check.js`. In `.wowsir` files and over MCP, `eval` takes the rest of the line verbatim, so quotes inside the JavaScript are kept.
 - Screenshots: `wowsir screenshot` prints a path. Use it only for visual checks; text is cheaper.
 - Parallel or isolated runs: add `-s <name>` to every command. Each session has its own cookies and storage.
+- Dark mode: `wowsir theme dark` (also `light`, `reduced-motion`, `off`).
 - Mobile: `wowsir viewport mobile` (touch, coarse pointer and a mobile user agent).
 - Scrollable lists and panels: `wowsir scroll 'list:Results' 600` (or `down`/`up`) scrolls inside the element; `wowsir scroll T` alone scrolls the page to it.
 - Tri-state checkboxes show `mixed`; `expect mixed T` asserts it, and `check`/`uncheck` click through mixed until they reach the state you asked for.

@@ -35,6 +35,7 @@ ASSERT     expect text|no-text TEXT · expect url|title PART · expect visible|h
            (assertions retry until --timeout, default 5000ms; exit code 1 on failure)
 DEBUG      console [--errors] [--all] · net [--failed] [--api] [--grep X] · net --body PATTERN [--full] · errors [--clear] · eval JS · eval --file F.js · eval - (stdin) · cookies [clear]
 SETUP      viewport W H [--mobile] | viewport mobile|tablet|desktop (mobile: touch + mobile user agent) · block images|fonts|media|css|lite|off
+           theme dark|light [reduced-motion] | theme off   (prefers-color-scheme for CSS and matchMedia)
            dialog accept [TEXT]|dismiss (TEXT is typed into prompt())
 AUTH       login URL               opens a visible window; a human signs in; cookies saved to ~/.wowsir/auth/
            login --from http://127.0.0.1:9222 DOMAIN   copy one site's cookies from a running debug Chrome

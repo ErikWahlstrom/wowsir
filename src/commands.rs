@@ -236,11 +236,11 @@ fn snap_header(title: &str, url: &str) -> String {
 
 pub const MUTATING: &[&str] = &[
     "open", "goto", "back", "forward", "reload", "click", "dblclick", "fill", "type", "press", "select", "check",
-    "uncheck", "hover", "scroll", "upload", "focus", "viewport", "resize", "tab",
+    "uncheck", "hover", "scroll", "upload", "focus", "viewport", "resize", "theme", "tab",
 ];
 pub const RECORDED: &[&str] = &[
     "open", "goto", "back", "forward", "reload", "click", "dblclick", "fill", "type", "press", "select", "check",
-    "uncheck", "hover", "scroll", "upload", "focus", "wait", "expect", "viewport", "block", "dialog", "tab", "mock", "watch",
+    "uncheck", "hover", "scroll", "upload", "focus", "wait", "expect", "viewport", "theme", "block", "dialog", "tab", "mock", "watch",
 ];
 
 impl Session {
@@ -1274,6 +1274,24 @@ impl Session {
                 };
                 self.call("Emulation.setUserAgentOverride", ua).await?;
                 Ok(format!("viewport {w}x{h}{}", if mobile { " mobile (touch, mobile user agent)" } else { "" }))
+            }
+            "theme" => {
+                // prefers-color-scheme (and reduced motion) as the page's CSS and matchMedia see it
+                let mut features = vec![];
+                let mut said = vec![];
+                for w in &a.pos {
+                    match w.as_str() {
+                        "dark" | "light" => { features.push(json!({"name": "prefers-color-scheme", "value": w})); said.push(w.clone()); }
+                        "reduced-motion" => { features.push(json!({"name": "prefers-reduced-motion", "value": "reduce"})); said.push(w.clone()); }
+                        "off" | "reset" => {}
+                        o => bail!("theme takes dark|light [reduced-motion] or off, got {o}"),
+                    }
+                }
+                if a.pos.is_empty() {
+                    bail!("usage: theme dark|light [reduced-motion] | theme off");
+                }
+                self.call("Emulation.setEmulatedMedia", json!({ "features": features })).await?;
+                Ok(if said.is_empty() { "theme: browser default".into() } else { format!("theme {}", said.join(" ")) })
             }
             "block" => {
                 let mut types = vec![];

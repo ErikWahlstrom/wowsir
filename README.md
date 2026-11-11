@@ -79,7 +79,7 @@ wowsir help
 | Wait | `wait MS` `wait T` `wait text X` `wait gone T` `wait url X` `wait idle` |
 | Assert | `expect text\|no-text X` `expect url\|title X` `expect visible\|hidden T` `expect value T V` `expect checked\|unchecked\|mixed T` `expect count T N` `expect no-errors` |
 | Debug | `console [--errors]` `net [--failed] [--api] [--grep X]` `net --body PATTERN` `errors` `eval JS` `cookies [clear]` |
-| Setup | `viewport W H [--mobile]` / `viewport mobile` (touch + mobile user agent) · `block images fonts media css\|lite\|off` · `dialog accept [TEXT]\|dismiss` (TEXT answers `prompt()`) |
+| Setup | `viewport W H [--mobile]` / `viewport mobile` (touch + mobile user agent) · `theme dark\|light\|off` · `block images fonts media css\|lite\|off` · `dialog accept [TEXT]\|dismiss` (TEXT answers `prompt()`) |
 | Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` |
 | Sessions | `-s NAME` / `WOWSIR_SESSION` · `sessions` · `close` · `stop` · `status` |
 
