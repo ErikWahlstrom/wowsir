@@ -5,12 +5,11 @@ mod daemon;
 mod keys;
 mod login;
 mod mcp;
+mod platform;
 mod session;
 
 use daemon::{Req, Resp};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -308,11 +307,7 @@ fn main() {
         let lock = daemon::dir().join("daemon.lock");
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
-            let Ok(f) = std::fs::OpenOptions::new().write(true).open(&lock) else {
-                break;
-            };
-            use std::os::fd::AsRawFd;
-            if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            if !lock.exists() || platform::try_lock(&lock).is_some() {
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -423,8 +418,7 @@ fn run_files(base: &Req, files: &[String], jobs: usize) -> i32 {
 }
 
 fn send(req: &Req, autostart: bool) -> Result<Resp, String> {
-    let sock = daemon::sock_path();
-    let mut stream = match UnixStream::connect(&sock) {
+    let mut stream = match platform::connect(&daemon::endpoint()) {
         Ok(s) => s,
         Err(_) if autostart => start_daemon(req.headed)?,
         Err(e) => return Err(e.to_string()),
@@ -447,7 +441,7 @@ fn send(req: &Req, autostart: bool) -> Result<Resp, String> {
     serde_json::from_str(&line).map_err(|e| e.to_string())
 }
 
-fn start_daemon(headed: bool) -> Result<UnixStream, String> {
+fn start_daemon(headed: bool) -> Result<platform::ClientStream, String> {
     let dir = daemon::dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let log = std::fs::OpenOptions::new()
@@ -464,17 +458,12 @@ fn start_daemon(headed: bool) -> Result<UnixStream, String> {
     cmd.stdin(Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
-    unsafe {
-        cmd.pre_exec(|| {
-            libc::setsid();
-            Ok(())
-        });
-    }
+    platform::detach(&mut cmd);
     cmd.spawn()
         .map_err(|e| format!("could not start daemon: {e}"))?;
     let start = Instant::now();
     loop {
-        if let Ok(s) = UnixStream::connect(daemon::sock_path()) {
+        if let Ok(s) = platform::connect(&daemon::endpoint()) {
             return Ok(s);
         }
         if start.elapsed() > Duration::from_secs(15) {

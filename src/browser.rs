@@ -1,13 +1,10 @@
-//! Locate and launch Chromium with a CDP pipe attached on fd 3/4.
+//! Locate and launch Chromium with a CDP pipe (fd 3/4 on Unix, inherited handles on Windows).
 
 use crate::cdp::Cdp;
 use anyhow::{bail, Context, Result};
-use std::os::fd::{FromRawFd, OwnedFd, RawFd};
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
-use tokio::net::unix::pipe;
 
 pub struct Browser {
     pub cdp: Arc<Cdp>,
@@ -24,9 +21,7 @@ impl Drop for Browser {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| "/".into())
+    crate::platform::home_dir()
 }
 
 /// Newest directory matching `prefix-<N>` inside `dir`.
@@ -54,6 +49,11 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
     }
     let pw = if cfg!(target_os = "macos") {
         home().join("Library/Caches/ms-playwright")
+    } else if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(home)
+            .join("ms-playwright")
     } else {
         home().join(".cache/ms-playwright")
     };
@@ -67,6 +67,8 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
                 "chrome-headless-shell-mac-x64/chrome-headless-shell",
                 "chrome-linux/headless_shell",
                 "chrome-headless-shell-linux64/chrome-headless-shell",
+                "chrome-win/headless_shell.exe",
+                "chrome-headless-shell-win64/chrome-headless-shell.exe",
             ] {
                 let p = d.join(c);
                 if p.exists() {
@@ -81,6 +83,23 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
         cands.push(d.join("chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"));
         cands.push(d.join("chrome-linux/chrome"));
         cands.push(d.join("chrome-linux64/chrome"));
+        cands.push(d.join("chrome-win/chrome.exe"));
+        cands.push(d.join("chrome-win64/chrome.exe"));
+    }
+    // Windows: per-machine and per-user installs of Chrome, then Edge (always present)
+    for (var, rel) in [
+        ("ProgramFiles", r"Google\Chrome\Application\chrome.exe"),
+        ("ProgramFiles(x86)", r"Google\Chrome\Application\chrome.exe"),
+        ("LOCALAPPDATA", r"Google\Chrome\Application\chrome.exe"),
+        (
+            "ProgramFiles(x86)",
+            r"Microsoft\Edge\Application\msedge.exe",
+        ),
+        ("ProgramFiles", r"Microsoft\Edge\Application\msedge.exe"),
+    ] {
+        if let Some(base) = std::env::var_os(var) {
+            cands.push(PathBuf::from(base).join(rel));
+        }
     }
     for p in [
         "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -102,30 +121,14 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
     bail!("no Chromium found. Install one (`npx playwright install chromium-headless-shell`) or set WOWSIR_CHROME=/path/to/chrome")
 }
 
-fn mkpipe() -> Result<(RawFd, RawFd)> {
-    let mut fds = [0 as RawFd; 2];
-    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        bail!("pipe() failed: {}", std::io::Error::last_os_error());
-    }
-    for fd in fds {
-        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-    }
-    Ok((fds[0], fds[1]))
-}
-
 pub fn launch(headed: bool) -> Result<Browser> {
     let (bin, _shell) = find_chrome(headed)?;
     let profile = std::env::temp_dir().join(format!("wowsir-profile-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
     std::fs::create_dir_all(&profile)?;
 
-    // browser reads commands from fd 3, writes responses to fd 4
-    let (to_browser_r, to_browser_w) = mkpipe()?;
-    let (from_browser_r, from_browser_w) = mkpipe()?;
-
     let mut cmd = Command::new(&bin);
-    cmd.arg("--remote-debugging-pipe")
-        .arg(format!("--user-data-dir={}", profile.display()))
+    cmd.arg(format!("--user-data-dir={}", profile.display()))
         .args([
             "--no-first-run",
             "--no-default-browser-check",
@@ -159,7 +162,7 @@ pub fn launch(headed: bool) -> Result<Browser> {
     let no_sandbox = std::env::var("WOWSIR_NO_SANDBOX")
         .map(|v| v != "0" && !v.is_empty())
         .unwrap_or(false)
-        || (cfg!(target_os = "linux") && unsafe { libc::geteuid() } == 0);
+        || (cfg!(target_os = "linux") && crate::platform::is_root());
     if no_sandbox {
         cmd.arg("--no-sandbox");
     }
@@ -173,27 +176,8 @@ pub fn launch(headed: bool) -> Result<Browser> {
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    unsafe {
-        cmd.pre_exec(move || {
-            // Move to high fds first so dup2 onto 3/4 can't clobber a source fd.
-            let a = libc::fcntl(to_browser_r, libc::F_DUPFD, 10);
-            let b = libc::fcntl(from_browser_w, libc::F_DUPFD, 10);
-            if a < 0 || b < 0 || libc::dup2(a, 3) < 0 || libc::dup2(b, 4) < 0 {
-                return Err(std::io::Error::last_os_error());
-            }
-            libc::setsid();
-            Ok(())
-        });
-    }
-    let child = cmd
-        .spawn()
+    let (child, rx, tx) = crate::platform::spawn_with_cdp_pipe(&mut cmd)
         .with_context(|| format!("launching {}", bin.display()))?;
-    unsafe {
-        libc::close(to_browser_r);
-        libc::close(from_browser_w);
-    }
-    let tx = pipe::Sender::from_owned_fd(unsafe { OwnedFd::from_raw_fd(to_browser_w) })?;
-    let rx = pipe::Receiver::from_owned_fd(unsafe { OwnedFd::from_raw_fd(from_browser_r) })?;
     let cdp = Cdp::new(rx, tx);
     Ok(Browser {
         cdp,

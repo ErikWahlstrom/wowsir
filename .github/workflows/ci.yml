@@ -20,7 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -28,6 +28,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # GitHub's runners come with Google Chrome; wowsir finds it on its own
       - name: Build and run tests/*.wowsir
+        shell: bash   # Git Bash on Windows
         run: ./tests/smoke.sh
         env:
           WOWSIR_NO_SANDBOX: "1"

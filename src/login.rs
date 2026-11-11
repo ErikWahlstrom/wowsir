@@ -59,10 +59,7 @@ pub fn auth_dir() -> PathBuf {
     if let Some(d) = std::env::var_os("WOWSIR_AUTH_DIR") {
         return PathBuf::from(d);
     }
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| ".".into());
-    home.join(".wowsir/auth")
+    crate::platform::home_dir().join(".wowsir").join("auth")
 }
 
 pub fn default_state_path(url: &str) -> PathBuf {
@@ -159,8 +156,7 @@ pub fn write_private(path: &Path, body: &str) -> Result<()> {
         std::fs::create_dir_all(d)?;
     }
     std::fs::write(path, body)?;
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    crate::platform::make_private(path)?;
     Ok(())
 }
 

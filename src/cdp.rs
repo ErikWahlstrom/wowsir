@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::unix::pipe;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Clone, Debug)]
@@ -31,7 +30,7 @@ pub struct Cdp {
 }
 
 impl Cdp {
-    pub fn new(mut rx: pipe::Receiver, mut tx: pipe::Sender) -> Arc<Self> {
+    pub fn new(mut rx: crate::platform::PipeRead, mut tx: crate::platform::PipeWrite) -> Arc<Self> {
         let pending: Arc<Pending> = Arc::new(Mutex::new(HashMap::new()));
         let routes: Arc<Mutex<HashMap<String, mpsc::UnboundedSender<Event>>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -41,7 +40,7 @@ impl Cdp {
         tokio::spawn(async move {
             while let Some(mut msg) = out_rx.recv().await {
                 msg.push(0);
-                if tx.write_all(&msg).await.is_err() {
+                if tx.write_all(&msg).await.is_err() || tx.flush().await.is_err() {
                     break;
                 }
             }

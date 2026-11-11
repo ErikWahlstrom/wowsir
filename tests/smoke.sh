@@ -8,7 +8,8 @@ PORT=8765
 # own home = own daemon (always this build) and no saved logins from the user's machine
 export WOWSIR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/wowsir-smoke.XXXXXX")"
 export WOWSIR_AUTH_DIR="$WOWSIR_HOME/auth"
-python3 -m http.server $PORT --directory tests/fixtures >/dev/null 2>&1 & SRV=$!
+PY=$(command -v python3 || command -v python)   # Windows runners only have `python`
+"$PY" -m http.server $PORT --directory tests/fixtures >/dev/null 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null; "$K" stop >/dev/null 2>&1; rm -rf "$WOWSIR_HOME"' EXIT
 for _ in $(seq 50); do curl -s -o /dev/null localhost:$PORT && break; sleep 0.1; done
 cd tests

@@ -11,32 +11,18 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 
 pub fn dir() -> PathBuf {
     if let Some(d) = std::env::var_os("WOWSIR_HOME") {
         return PathBuf::from(d);
     }
-    let uid = unsafe { libc::getuid() };
-    // fixed path (not $TMPDIR) so every caller finds the same daemon
-    PathBuf::from(format!("/tmp/wowsir-{uid}"))
+    crate::platform::runtime_dir()
 }
 
-pub fn sock_path() -> PathBuf {
-    let p = dir().join("wowsir.sock");
-    // unix socket paths max out around 104 bytes: fall back to a short, stable path
-    if p.as_os_str().len() > 100 {
-        use std::hash::{Hash, Hasher};
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        p.hash(&mut h);
-        return PathBuf::from(format!(
-            "/tmp/wowsir-{}-{:x}.sock",
-            unsafe { libc::getuid() },
-            h.finish()
-        ));
-    }
-    p
+/// Where the daemon listens (unix socket path or Windows named pipe).
+pub fn endpoint() -> String {
+    crate::platform::endpoint(&dir())
 }
 
 #[derive(Deserialize, Serialize, Default, Clone)]
@@ -104,18 +90,10 @@ pub async fn run(headed: bool) -> Result<()> {
     let d = dir();
     std::fs::create_dir_all(&d)?;
     // single-instance lock
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .write(true)
-        .open(d.join("daemon.lock"))?;
-    use std::os::fd::AsRawFd;
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
+    let Some(lock) = crate::platform::try_lock(&d.join("daemon.lock")) else {
         return Ok(()); // another daemon is starting/running
-    }
-    let sock = sock_path();
-    let _ = std::fs::remove_file(&sock);
-    let listener = UnixListener::bind(&sock)?;
+    };
+    let mut listener = crate::platform::Listener::bind(&endpoint())?;
 
     let daemon = Arc::new(Daemon {
         browser: Mutex::new(None),
@@ -151,9 +129,9 @@ pub async fn run(headed: bool) -> Result<()> {
             }
         });
     }
-    std::mem::forget(lock); // keep the flock for the life of the process
+    std::mem::forget(lock); // keep the lock for the life of the process
     loop {
-        let (stream, _) = listener.accept().await?;
+        let stream = listener.accept().await?;
         let d2 = daemon.clone();
         tokio::spawn(async move {
             let _ = d2.handle(stream).await;
@@ -167,7 +145,7 @@ impl Daemon {
             s.lock().await.close().await;
         }
         drop(self.browser.lock().await.take());
-        let _ = std::fs::remove_file(sock_path());
+        crate::platform::remove_endpoint(&endpoint());
         std::process::exit(0);
     }
 
@@ -258,8 +236,8 @@ impl Daemon {
         Err(last_err.unwrap())
     }
 
-    async fn handle(self: Arc<Self>, stream: UnixStream) -> Result<()> {
-        let (r, mut w) = stream.into_split();
+    async fn handle(self: Arc<Self>, stream: Box<dyn crate::platform::Conn>) -> Result<()> {
+        let (r, mut w) = tokio::io::split(stream);
         let mut line = String::new();
         BufReader::new(r).read_line(&mut line).await?;
         let req: Req = serde_json::from_str(&line)?;
@@ -272,7 +250,7 @@ impl Daemon {
             resp.out.push_str("\n! wowsir was updated after this daemon started, so commands still run the old version. `wowsir stop` switches to the new one (it ends running sessions, including other agents').");
         }
         if resp.code == 99 {
-            let _ = std::fs::remove_file(sock_path());
+            crate::platform::remove_endpoint(&endpoint());
         }
         let mut bytes = serde_json::to_vec(&resp)?;
         bytes.push(b'\n');
