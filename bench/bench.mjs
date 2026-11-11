@@ -3,9 +3,11 @@
 // with each tool, and measure what the agent pays (calls, tokens, time) and
 // what it learns (pass/fail, errors surfaced).
 //
-//   node bench/bench.mjs scenarios/public-login.mjs [--runs 3] [--auth ~/.kite/auth/x.json] [--only kite|devtools] [--show]
-import { Mcp, launchChrome, cdp, devtoolsMcpCommand, kite, est, sh, now, KITE } from './lib.mjs';
-import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync } from 'node:fs';
+//   ./bench/fetch-sites.sh   (once: W3C examples, served locally on 127.0.0.1:8982)
+//   node bench/bench.mjs bench/scenarios/*.mjs [--runs 3] [--mcp] [--only kite|devtools] [--show]
+import { Mcp, launchChrome, cdp, devtoolsMcpCommand, kite, est, sh, now, KITE, APG, APG_PORT } from './lib.mjs';
+import { createServer } from 'node:http';
+import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -197,14 +199,31 @@ async function devtoolsDriver(scenario, dt) {
 
 // ------------------------------------------------------------------ report
 const median = (a) => { const s = [...a].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; };
+// scenario.noise: a regex for known third-party failures (e.g. analytics) left out of the error counts
+let noise = null;
 function summarize(runs) {
   const calls = median(runs.map((r) => r.rec.calls.length));
   const bytes = median(runs.map((r) => r.rec.calls.reduce((s, c) => s + c.bytes, 0)));
   const ms = median(runs.map((r) => r.rec.calls.reduce((s, c) => s + c.ms, 0)));
   const passed = runs.filter((r) => r.failures.length === 0).length;
   const stale = median(runs.map((r) => r.rec.stale)), checked = median(runs.map((r) => r.rec.checked));
-  const issues = new Set(runs.flatMap((r) => [...r.rec.issues]));
+  const issues = new Set(runs.flatMap((r) => [...r.rec.issues]).filter((i) => !(noise && noise.test(i))));
   return { calls, bytes, tokens: est(bytes), ms: Math.round(ms), passed, runs: runs.length, stale, checked, issues: [...issues], failures: runs.flatMap((r) => r.failures) };
+}
+
+// Static server for the W3C examples (only started when a scenario uses them).
+const MIME = { html: 'text/html', js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', json: 'application/json', woff2: 'font/woff2' };
+let apgServer = null;
+function serveApg() {
+  if (apgServer) return;
+  const root = join(here, 'sites', 'aria-practices');
+  if (!existsSync(root)) { console.error('W3C examples missing: run bench/fetch-sites.sh first'); process.exit(1); }
+  apgServer = createServer((req, res) => {
+    const p = join(root, decodeURIComponent(new URL(req.url, 'http://x').pathname));
+    if (!p.startsWith(root) || !existsSync(p) || !statSync(p).isFile()) { res.writeHead(404); return res.end(); }
+    res.writeHead(200, { 'content-type': MIME[p.split('.').pop()] || 'application/octet-stream' });
+    res.end(readFileSync(p));
+  }).listen(APG_PORT, '127.0.0.1');
 }
 
 const dt = devtoolsMcpCommand();
@@ -213,7 +232,9 @@ for (const f of files) {
   const path = resolve(process.cwd(), f);
   const scenario = (await import(path)).default;
   checkHosts(scenario);
+  if (scenario.steps.some((st) => st.url && st.url.startsWith(APG))) serveApg();
   if (scenario.auth && !authCookies().length) { console.log(`skip ${scenario.name}: needs a saved login (kite login <url> or kite login --from http://127.0.0.1:9222 <domain>)`); continue; }
+  noise = scenario.noise || null;
   const res = { scenario: scenario.name, file: basename(f) };
   for (const tool of TOOLS) {
     if (ONLY && ONLY !== tool) continue;
@@ -245,4 +266,5 @@ mkdirSync(join(here, 'results'), { recursive: true });
 const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 writeFileSync(join(here, 'results', `${stamp}.md`), md);
 writeFileSync(join(here, 'results', `${stamp}.json`), JSON.stringify(allResults, null, 2));
+apgServer?.close();
 process.exit(0);

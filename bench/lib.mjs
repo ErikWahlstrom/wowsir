@@ -128,6 +128,10 @@ export function kite(session, args, { quiet = false } = {}) {
   });
 }
 
+// W3C ARIA examples, served locally by bench.mjs (fetch them with bench/fetch-sites.sh)
+export const APG_PORT = 8982;
+export const APG = `http://127.0.0.1:${APG_PORT}/content/patterns`;
+export const INTERNET = 'https://the-internet.herokuapp.com';
 export const est = (bytes) => Math.round(bytes / 4);
 export const sh = (s) => (/^[\w@:./=-]+$/.test(s) ? s : JSON.stringify(s));
 export { execFileSync };
