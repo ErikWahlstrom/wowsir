@@ -116,6 +116,8 @@ pub struct State {
     pub doc_seq: u64,
     pub world: Option<i64>,
     pub dialog_accept: bool,
+    /// text typed into prompt() dialogs (`dialog accept TEXT`)
+    pub dialog_text: Option<String>,
     pub block_types: Vec<String>,
     pub mocks: Vec<Mock>,
     /// network request ids a mock is deliberately holding back (never block settling)
@@ -138,6 +140,7 @@ impl State {
             doc_seq: 0,
             world: None,
             dialog_accept: true,
+            dialog_text: None,
             block_types: vec![],
             mocks: vec![],
             delayed: Default::default(),
@@ -527,13 +530,14 @@ impl Session {
 
     async fn adopt(&mut self, target: &str, url: &str) -> Result<()> {
         let (sid, st) = attach_page(&self.cdp, target).await?;
-        let (blocking, mocks, accept) = {
+        let (blocking, mocks, accept, text) = {
             let s = self.st.lock().unwrap();
-            (s.block_types.clone(), s.mocks.clone(), s.dialog_accept)
+            (s.block_types.clone(), s.mocks.clone(), s.dialog_accept, s.dialog_text.clone())
         };
         {
             let mut s = st.lock().unwrap();
             s.dialog_accept = accept;
+            s.dialog_text = text;
             s.url = url.to_string();
         }
         // we may have attached mid-load: find out where the page is
@@ -864,14 +868,20 @@ async fn event_loop(
                 }
             }
             "Page.javascriptDialogOpening" => {
-                let accept = st.lock().unwrap().dialog_accept;
+                let (accept, text) = {
+                    let s = st.lock().unwrap();
+                    (s.dialog_accept, s.dialog_text.clone())
+                };
                 let ty = p["type"].as_str().unwrap_or("alert").to_string();
                 let msg = clip(p["message"].as_str().unwrap_or(""), 200);
                 st.lock().unwrap().events.push(format!(
                     "dialog {ty} \"{msg}\" → {}",
                     if accept || ty == "alert" { "accepted" } else { "dismissed" }
                 ));
-                let prompt = p["defaultPrompt"].as_str().unwrap_or("").to_string();
+                let prompt = match (&text, ty.as_str()) {
+                    (Some(t), "prompt") => t.clone(),
+                    _ => p["defaultPrompt"].as_str().unwrap_or("").to_string(),
+                };
                 let cdp = cdp.clone();
                 let sid = sid.clone();
                 tokio::spawn(async move {

@@ -1,0 +1,21 @@
+# Tri-state checkboxes, custom combobox values, scrolling inside an element,
+# prompt() text, and no "session expired" warning after logging out.
+open localhost:8765/widgets.html
+expect mixed 'checkbox:All toppings'
+uncheck 'checkbox:All toppings'
+expect unchecked 'checkbox:All toppings'
+expect unchecked checkbox:Cheese
+check 'checkbox:All toppings'
+expect checked checkbox:Olives
+snap --in combobox:Fruit --grep 'value="Apple"'
+click 'button:Pick pear'
+expect text Pear
+scroll 'list:Long list' 300
+eval if (document.getElementById('list').scrollTop !== 300) throw new Error('list not scrolled: ' + document.getElementById('list').scrollTop)
+expect visible 'text=Row 12'
+dialog accept Ada
+click 'button:Ask name'
+expect text 'Hello, Ada'
+click 'link:Log out'
+expect url login.html
+expect no-errors

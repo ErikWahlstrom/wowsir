@@ -1,0 +1,42 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Widgets</title>
+<style>#list { height: 120px; overflow-y: auto; border: 1px solid #ccc } #list li { height: 30px }</style></head>
+<body>
+<main>
+  <h1>Widgets</h1>
+  <!-- tri-state checkbox: unchecked → checked → mixed (when some children are set) -->
+  <fieldset><legend>Toppings</legend>
+    <div role="checkbox" tabindex="0" id="all" aria-checked="mixed">All toppings</div>
+    <label><input type="checkbox" class="t" checked> Cheese</label>
+    <label><input type="checkbox" class="t"> Olives</label>
+  </fieldset>
+  <!-- select-only combobox: its value is text, not an input -->
+  <label id="fl">Fruit</label>
+  <div role="combobox" tabindex="0" aria-labelledby="fl" aria-expanded="false" id="fruit">Apple</div>
+  <button id="pear">Pick pear</button>
+  <ul id="list" role="list" aria-label="Long list"></ul>
+  <button id="ask">Ask name</button>
+  <p id="answer"></p>
+  <a href="login.html?bye=1" id="out">Log out</a>
+</main>
+<script>
+  const all = document.getElementById('all'), kids = [...document.querySelectorAll('.t')];
+  let saved = kids.map((k) => k.checked);
+  const sync = () => {
+    const n = kids.filter((k) => k.checked).length;
+    all.setAttribute('aria-checked', n === 0 ? 'false' : n === kids.length ? 'true' : 'mixed');
+  };
+  all.addEventListener('click', () => {
+    const st = all.getAttribute('aria-checked');
+    if (st === 'mixed') kids.forEach((k) => (k.checked = true));
+    else if (st === 'true') kids.forEach((k) => (k.checked = false));
+    else kids.forEach((k, i) => (k.checked = saved[i]));
+    sync();
+  });
+  kids.forEach((k) => k.addEventListener('change', () => { saved = kids.map((k) => k.checked); sync(); }));
+  document.getElementById('pear').onclick = () => (document.getElementById('fruit').textContent = 'Pear');
+  const ul = document.getElementById('list');
+  for (let i = 1; i <= 50; i++) { const li = document.createElement('li'); li.textContent = 'Row ' + i; ul.append(li); }
+  document.getElementById('ask').onclick = () => (document.getElementById('answer').textContent = 'Hello, ' + prompt('Your name?'));
+</script>
+</body></html>

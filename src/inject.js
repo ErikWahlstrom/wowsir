@@ -253,6 +253,11 @@ function attrsOf(el, role, opts) {
     if (t === 'input' && el.type && !['text', 'search', 'number', 'range'].includes(el.type)) a.push('type=' + el.type);
   }
   if (t === 'input' && el.type === 'file') a.push('type=file' + (el.files && el.files.length ? ' files=' + q([...el.files].map((f) => f.name).join(', ')) : ''));
+  if (role === 'combobox' && t !== 'select') {
+    // editable comboboxes hold their value in the input; select-only ones show it as text
+    const v = norm(t === 'input' || t === 'textarea' ? el.value : el.innerText || '');
+    if (v && v !== nameOf(el, role)) a.push('value=' + q(trunc(v, 60)));
+  }
   if (t === 'select') {
     const sel = [...el.selectedOptions].map((o) => norm(o.label));
     if (sel.length) a.push('value=' + q(trunc(sel.join(', '), 60)));
@@ -263,8 +268,8 @@ function attrsOf(el, role, opts) {
   }
   if (role === 'checkbox' || role === 'radio' || role === 'switch' || role === 'menuitemcheckbox' || role === 'menuitemradio') {
     const c = t === 'input' ? el.checked : aria('checked') === 'true';
-    if (c) a.push('checked');
-    if (t === 'input' && el.indeterminate) a.push('mixed');
+    if ((t === 'input' && el.indeterminate) || aria('checked') === 'mixed') a.push('mixed');
+    else if (c) a.push('checked');
   }
   if (el.disabled || aria('disabled') === 'true') a.push('disabled');
   if (el.required || aria('required') === 'true') a.push('required');
@@ -813,14 +818,31 @@ K.select = (t, values, sel) => {
   return { desc: describe(el), picked: picked.map((o) => norm(o.label)), sel: s };
 };
 
+// true | false | 'mixed' (tri-state checkboxes)
 K.checked = (t) => {
   const el = resolve(t);
-  if (el.localName === 'input') return el.checked;
+  if (el.localName === 'input') return el.indeterminate ? 'mixed' : el.checked;
   const a = el.getAttribute('aria-checked') || el.getAttribute('aria-pressed') || el.getAttribute('aria-selected');
+  if (a === 'mixed') return 'mixed';
   if (a !== null) return a === 'true';
   const inner = el.querySelector && el.querySelector('input[type=checkbox],input[type=radio]');
   if (inner) return inner.checked;
   throw new Error(describe(el) + ' is not checkable');
+};
+
+// Scroll inside T: T itself or its nearest scrollable ancestor, else its first scrollable descendant.
+K.scrollIn = (t, amount, dir) => {
+  const el = resolve(t);
+  const page = (e) => e === document.documentElement || e === document.body;
+  const can = (e) => e && e.nodeType === 1 && !page(e) && e.scrollHeight > e.clientHeight + 1 && /(auto|scroll|overlay)/.test(getComputedStyle(e).overflowY);
+  let s = el;
+  while (s && !can(s)) s = s.parentElement || (s.getRootNode && s.getRootNode().host) || null;
+  if (!s) s = [...el.querySelectorAll('*')].find(can);
+  if (!s) throw new Error(describe(el) + ' has no scrollable area of its own (`scroll T` alone scrolls the page to it)');
+  el.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  const dy = amount != null ? amount : s.clientHeight * 0.8;
+  s.scrollBy({ top: dir === 'up' ? -dy : dy, behavior: 'instant' });
+  return { desc: describe(s), y: Math.round(s.scrollTop), h: Math.round(s.scrollHeight - s.clientHeight) };
 };
 
 K.isFileInput = (t) => {

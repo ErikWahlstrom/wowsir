@@ -350,7 +350,10 @@ impl Session {
             t.push_str(&format!("\n! document status {status}"));
         }
         let h = head.to_lowercase();
-        let meant_to = ["login", "log in", "sign in", "signin"].iter().any(|k| h.contains(k));
+        // signing in or out is expected to land on a login page
+        let meant_to = ["login", "log in", "sign in", "signin", "logout", "log out", "sign out", "signout", "sign-out", "log-out"]
+            .iter()
+            .any(|k| h.contains(k));
         if navigated && looks_like_login(&url) && !looks_like_login(before_url) && !meant_to {
             // the page that bounced us is the one to sign in to (it redirects to the provider and back)
             let page = if head.starts_with("open ") { self.last_open.clone() } else { before_url.to_string() };
@@ -916,22 +919,33 @@ impl Session {
             "check" | "uncheck" => {
                 let target = a.p(0, "target")?;
                 let want = cmd == "check";
-                let cur = self.k("checked", &[json!(target)]).await?.as_bool().unwrap_or(false);
-                if cur == want {
+                let cur = self.k("checked", &[json!(target)]).await?;
+                if cur.as_bool() == Some(want) {
                     let d = self.k("describe", &[json!(target)]).await?;
                     return Ok(format!("{cmd} {} (already)", d.as_str().unwrap_or(target)));
                 }
-                let v = self.click_target(target, "left", 1, to).await?;
-                if let Some(sel) = v["sel"].as_str() {
-                    *rec = Some(vec![cmd.into(), sel.into()]);
+                // tri-state boxes cycle through mixed: keep clicking (max 3) until the wanted state
+                let mut path = vec![tri(&cur)];
+                let mut desc = target.to_string();
+                for i in 0..3 {
+                    let v = self.click_target(target, "left", 1, to).await?;
+                    if i == 0 {
+                        if let Some(sel) = v["sel"].as_str() {
+                            *rec = Some(vec![cmd.into(), sel.into()]);
+                        }
+                    }
+                    desc = v["desc"].as_str().unwrap_or(target).to_string();
+                    tokio::time::sleep(Duration::from_millis(15)).await;
+                    let now = self.k("checked", &[json!(target)]).await.unwrap_or(Value::Null);
+                    path.push(tri(&now));
+                    if now.as_bool() == Some(want) {
+                        return Ok(if i == 0 { format!("{cmd} {desc}") } else { format!("{cmd} {desc} ({})", path.join(" → ")) });
+                    }
+                    if now == cur && i == 0 {
+                        bail!("clicked {desc} but its checked state did not change");
+                    }
                 }
-                let desc = v["desc"].as_str().unwrap_or(target).to_string();
-                tokio::time::sleep(Duration::from_millis(15)).await;
-                let now = self.k("checked", &[json!(target)]).await.ok().and_then(|v| v.as_bool());
-                if now == Some(cur) {
-                    bail!("clicked {desc} but its checked state did not change");
-                }
-                Ok(format!("{cmd} {desc}"))
+                bail!("clicked {desc} 3 times but never reached {}: {}", if want { "checked" } else { "unchecked" }, path.join(" → "))
             }
             "focus" => {
                 let target = a.p(0, "target")?;
@@ -968,6 +982,18 @@ impl Session {
                     "bottom" => {
                         self.js("scrollTo({top:document.documentElement.scrollHeight,behavior:'instant'})").await?;
                         Ok("scroll bottom".into())
+                    }
+                    t if a.pos.len() > 1 => {
+                        // scroll inside the element: `scroll T down|up [PX]` or `scroll T PX`
+                        let (dir, amt) = match a.pos[1].as_str() {
+                            d @ ("down" | "up") => (d, a.pos.get(2).and_then(|p| p.parse::<f64>().ok())),
+                            n => {
+                                let px: f64 = n.parse().map_err(|_| anyhow!("scroll T takes down|up [PX] or PX, got {n}"))?;
+                                if px < 0.0 { ("up", Some(-px)) } else { ("down", Some(px)) }
+                            }
+                        };
+                        let v = self.k("scrollIn", &[json!(t), json!(amt), json!(dir)]).await?;
+                        Ok(format!("scroll {} {dir} → y={} of {}", v["desc"].as_str().unwrap_or(t), v["y"], v["h"]))
                     }
                     t => {
                         let d = self
@@ -1234,7 +1260,20 @@ impl Session {
                 )
                 .await?;
                 self.call("Emulation.setTouchEmulationEnabled", json!({ "enabled": mobile })).await?;
-                Ok(format!("viewport {w}x{h}{}", if mobile { " mobile" } else { "" }))
+                // phones also differ in user agent, which server-side mobile detection reads
+                let ver = self.call("Browser.getVersion", json!({})).await.ok()
+                    .and_then(|v| v["product"].as_str().and_then(|p| p.split('/').nth(1)).map(|v| v.split('.').next().unwrap_or("0").to_string()))
+                    .unwrap_or_else(|| "131".into());
+                let ua = if mobile {
+                    let tok = if w >= 600 { "" } else { " Mobile" };
+                    json!({"userAgent": format!("Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/{ver}.0.0.0{tok} Safari/537.36"),
+                           "userAgentMetadata": {"platform": "Android", "platformVersion": "10", "architecture": "", "model": "K", "mobile": w < 600,
+                                                 "brands": [{"brand": "Chromium", "version": ver}]}})
+                } else {
+                    json!({"userAgent": ""}) // back to the browser's own
+                };
+                self.call("Emulation.setUserAgentOverride", ua).await?;
+                Ok(format!("viewport {w}x{h}{}", if mobile { " mobile (touch, mobile user agent)" } else { "" }))
             }
             "block" => {
                 let mut types = vec![];
@@ -1326,10 +1365,17 @@ impl Session {
                 let accept = match a.pos.first().map(|s| s.as_str()) {
                     Some("accept") | None => true,
                     Some("dismiss") => false,
-                    Some(o) => bail!("expected accept|dismiss, got {o}"),
+                    Some(o) => bail!("expected accept [TEXT] | dismiss, got {o}"),
                 };
-                self.st.lock().unwrap().dialog_accept = accept;
-                Ok(format!("dialogs will be {}", if accept { "accepted" } else { "dismissed" }))
+                let text = (a.pos.len() > 1).then(|| a.pos[1..].join(" "));
+                if text.is_some() && !accept {
+                    bail!("dismiss takes no text (prompt text only applies with `dialog accept TEXT`)");
+                }
+                let note = text.as_ref().map(|t| format!("; prompts get \"{t}\"")).unwrap_or_default();
+                let mut st = self.st.lock().unwrap();
+                st.dialog_accept = accept;
+                st.dialog_text = text;
+                Ok(format!("dialogs will be {}{note}", if accept { "accepted" } else { "dismissed" }))
             }
             "cookies" => {
                 if a.pos.first().map(|s| s.as_str()) == Some("clear") {
@@ -1528,9 +1574,9 @@ impl Session {
                     Err(e) => return Err(e),
                 }
             }
-            "checked" | "unchecked" => {
-                let v = self.k("checked", &[json!(rest)]).await?.as_bool().unwrap_or(false);
-                (v == (kind == "checked"), format!("{rest} {kind}"), Some(if v { "checked".into() } else { "unchecked".into() }))
+            "checked" | "unchecked" | "mixed" => {
+                let v = tri(&self.k("checked", &[json!(rest)]).await?);
+                (v == kind, format!("{rest} {kind}"), Some(v.to_string()))
             }
             "count" => {
                 let n: i64 = a.pos.last().and_then(|n| n.parse().ok()).ok_or_else(|| anyhow!("usage: expect count <target> <n>"))?;
@@ -1549,6 +1595,15 @@ impl Session {
 }
 
 use crate::login::looks_like_login;
+
+/// checked state as reported by K.checked: true | false | "mixed"
+fn tri(v: &Value) -> &'static str {
+    match v.as_bool() {
+        Some(true) => "checked",
+        Some(false) => "unchecked",
+        None => "mixed",
+    }
+}
 
 fn truncate_chars(s: &str, max: usize) -> String {
     let n = s.chars().count();

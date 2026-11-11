@@ -70,11 +70,11 @@ kite help
 | Mock | `mock /api/items 500` · `mock /api/items --json '{"items":[]}'` · `mock /api/x abort` · `mock /api/x --delay 3000` · `mock off` |
 | Tabs | `tabs` `tab N` `tab new [URL]` `tab close [N]` (popups and `target=_blank` pages are followed automatically) |
 | See | `snap [-i] [--grep X] [--in T] [--viewport] [--full] [--urls] [--ids] [--all]` `text [T]` `html [T]` `screenshot [PATH] [--full] [--el T]` |
-| Act | `click T [--ctrl\|--shift\|--mod]` `fill T TEXT` `type [T] TEXT` `press KEY…` `select T OPT…` `check T` `uncheck T` `hover T` `focus T` `upload T FILE…` `scroll [down\|up\|top\|bottom\|T]` |
+| Act | `click T [--ctrl\|--shift\|--mod]` `fill T TEXT` `type [T] TEXT` `press KEY…` `select T OPT…` `check T` `uncheck T` `hover T` `focus T` `upload T FILE…` `scroll [down\|up\|top\|bottom\|T]` `scroll T down\|up\|PX` (inside a scrollable element) |
 | Wait | `wait MS` `wait T` `wait text X` `wait gone T` `wait url X` `wait idle` |
-| Assert | `expect text\|no-text X` `expect url\|title X` `expect visible\|hidden T` `expect value T V` `expect checked\|unchecked T` `expect count T N` `expect no-errors` |
+| Assert | `expect text\|no-text X` `expect url\|title X` `expect visible\|hidden T` `expect value T V` `expect checked\|unchecked\|mixed T` `expect count T N` `expect no-errors` |
 | Debug | `console [--errors]` `net [--failed] [--api] [--grep X]` `net --body PATTERN` `errors` `eval JS` `cookies [clear]` |
-| Setup | `viewport W H [--mobile]` / `viewport mobile` · `block images fonts media css\|lite\|off` · `dialog accept\|dismiss` |
+| Setup | `viewport W H [--mobile]` / `viewport mobile` (touch + mobile user agent) · `block images fonts media css\|lite\|off` · `dialog accept [TEXT]\|dismiss` (TEXT answers `prompt()`) |
 | Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` |
 | Sessions | `-s NAME` / `KITE_SESSION` · `sessions` · `close` · `stop` · `status` |
 
@@ -135,11 +135,15 @@ $ kite run tests/login.kite
 
 `run` stops at the first failure, prints the failing line and reason, and exits with code 1.
 
-With several files, each runs in its own fresh session (own cookies, tabs and mocks; saved logins still load), and `--parallel N` runs N at a time in the same browser. The 5 files in `tests/` take 1.5 s in parallel and 4.8 s one by one. Output is printed per file, in order, followed by `✓ 5/5 files passed`.
+With several files, each runs in its own fresh session (own cookies, tabs and mocks; saved logins still load), and `--parallel N` runs N at a time in the same browser. The 7 files in `tests/` take about 1.4 s with `--parallel 8`. Output is printed per file, in order, followed by `✓ 7/7 files passed`.
 
 ```
 kite run tests/*.kite --parallel 4
 ```
+
+## Benchmark
+
+Seven scenarios on public sites (W3C ARIA examples, the-internet.herokuapp.com, TodoMVC), each driven the way an agent would with kite and with chrome-devtools-mcp. kite used 47 calls and about 10k tokens; chrome-devtools-mcp used 55 calls and about 125k tokens, and could not pick an option from the W3C combobox because its snapshot left the options out. Details and how to reproduce: [bench/RESULTS.md](bench/RESULTS.md).
 
 ## Architecture
 
@@ -172,6 +176,7 @@ kite (CLI, sync, ~1ms) ──unix socket──▶ kite daemon (tokio)
 ## Limits / TODO
 
 - Cross-origin iframes are listed but not traversed (same-origin iframes are).
+- Closed shadow roots are not traversed (open ones are).
 - Unix only (macOS/Linux): it uses fd passing and unix sockets.
 
 ## Dev

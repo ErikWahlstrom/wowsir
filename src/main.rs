@@ -28,14 +28,14 @@ SEE        snap [-i] [--grep TEXT] [--in TARGET] [--viewport] [--full] [--urls] 
            text [TARGET] · html [TARGET] · screenshot [PATH] [--full] [--el TARGET]
 ACT        click T [--double|--right] [--ctrl|--shift|--alt|--meta|--mod] · fill T TEXT · type [T] TEXT · press KEY... (Enter, Tab, Control+a, Mod+Enter)
            select T OPTION... · check T · uncheck T · hover T · focus T · upload T FILE...
-           scroll [down|up|top|bottom|T] [PX]
+           scroll [down|up|top|bottom|T] [PX] · scroll T down|up|PX (inside a scrollable list/panel)
 WAIT       wait MS | wait T | wait text TEXT | wait gone T | wait url PART | wait idle
 ASSERT     expect text|no-text TEXT · expect url|title PART · expect visible|hidden T
-           expect value T VALUE · expect checked|unchecked T · expect count T N · expect no-errors
+           expect value T VALUE · expect checked|unchecked|mixed T · expect count T N · expect no-errors
            (assertions retry until --timeout, default 5000ms; exit code 1 on failure)
 DEBUG      console [--errors] [--all] · net [--failed] [--api] [--grep X] · net --body PATTERN [--full] · errors [--clear] · eval JS · eval --file F.js · eval - (stdin) · cookies [clear]
-SETUP      viewport W H [--mobile] | viewport mobile|tablet|desktop · block images|fonts|media|css|lite|off
-           dialog accept|dismiss
+SETUP      viewport W H [--mobile] | viewport mobile|tablet|desktop (mobile: touch + mobile user agent) · block images|fonts|media|css|lite|off
+           dialog accept [TEXT]|dismiss (TEXT is typed into prompt())
 AUTH       login URL               opens a visible window; a human signs in; cookies saved to ~/.kite/auth/
            login --from http://127.0.0.1:9222 DOMAIN   copy one site's cookies from a running debug Chrome
            Saved logins load into every new session automatically (--no-auth for a clean one).

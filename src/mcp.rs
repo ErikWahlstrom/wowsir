@@ -12,7 +12,7 @@ const BROWSER_DESC: &str = r#"Headless browser for testing web pages (kite). Pas
 After each action kite waits for the page to settle and returns: `ok <action> · <ms>`, `→ <new url>`, `! <console/network errors, dialogs>`, and `~` a diff of the page (+ added, - removed). Act on refs from the output; you rarely need a fresh snapshot.
 Commands:
   open <url> | back | reload | tabs | tab N | tab close | snap [-i] [--grep TEXT] [--in TARGET] [--viewport]
-  click T [--mod|--shift] | fill T TEXT | type [T] TEXT | press KEY (Enter, Control+a) | select T OPTION | check T | uncheck T | hover T | scroll [down|up|T] | upload T FILE
+  click T [--mod|--shift] | fill T TEXT | type [T] TEXT | press KEY (Enter, Control+a) | select T OPTION | check T | uncheck T | hover T | scroll [down|up|T] | scroll T down|PX (inside it) | upload T FILE
   wait text TEXT | wait gone T | wait url PART
   expect text|no-text TEXT | expect url PART | expect visible|hidden T | expect value T V | expect count T N | expect no-errors
   text [T] | console [--errors] | net [--failed] | net --body PATTERN | errors | eval JS | screenshot [PATH] | viewport W H | viewport mobile

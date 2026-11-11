@@ -77,7 +77,10 @@ Multi-step scripts can be written directly: `kite run - <<'EOF'` followed by one
 - Debugging: `kite console --errors`, `kite net --failed`, `kite net --api`, `kite net --body /api/items` (response body of the latest matching request), `kite errors`, `kite eval "window.store.state"` (runs in the page's main world). For longer scripts, or to avoid quoting trouble, write the JavaScript to a file and run `kite eval --file check.js`. In `.kite` files and over MCP, `eval` takes the rest of the line verbatim, so quotes inside the JavaScript are kept.
 - Screenshots: `kite screenshot` prints a path. Use it only for visual checks; text is cheaper.
 - Parallel or isolated runs: add `-s <name>` to every command. Each session has its own cookies and storage.
-- Mobile: `kite viewport mobile`.
+- Mobile: `kite viewport mobile` (touch, coarse pointer and a mobile user agent).
+- Scrollable lists and panels: `kite scroll 'list:Results' 600` (or `down`/`up`) scrolls inside the element; `kite scroll T` alone scrolls the page to it.
+- Tri-state checkboxes show `mixed`; `expect mixed T` asserts it, and `check`/`uncheck` click through mixed until they reach the state you asked for.
+- `prompt()` dialogs: `kite dialog accept 'some text'` before the click that opens them.
 - Multi-select: `kite click @e5 --mod` (Cmd on macOS, Ctrl elsewhere), `--shift`, `--ctrl`, `--alt`.
 - Long dropdowns: `kite snap --full` lists every option untruncated.
 - Error/empty/loading states without touching the backend: `kite mock /api/items 500`, `kite mock /api/items --json '{"items":[]}'`, `kite mock /api/items abort` (network failure), `kite mock /api/items --delay 3000` (the action returns while the request is held, so you see the loading state). The pattern is a URL substring or glob. `kite mock` lists mocks with hit counts, `kite mock off` clears them. Mocks apply from the next request, so click refresh or `kite reload`.
