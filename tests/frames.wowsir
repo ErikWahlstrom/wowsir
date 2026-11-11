@@ -1,0 +1,12 @@
+# Cross-origin iframe (localhost page, 127.0.0.1 frame): snapshot, fill, real click, text, errors
+open localhost:8765/frames.html
+expect visible 'textbox:Card number'
+fill 'textbox:Card number' 4242424242424242
+click button:Pay
+expect text 'Paid 4242'
+expect text 'Card ending 4242'
+expect count button:Pay 1
+# mocks apply to requests made inside the frame too
+mock /api/items.json --json '{"items":[1,2,3,4,5,6,7]}'
+click 'button:Load items'
+expect text 'Items: 7'

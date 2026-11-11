@@ -37,6 +37,12 @@ function ref(el) {
   return n;
 }
 K.init = (n) => { if (n > nextRef) nextRef = n; };
+K.refOf = (el) => ref(el);
+// where a frame's content starts on the page (its content box), for frame-relative points
+K.frameBox = (el) => {
+  const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+  return { x: r.left + el.clientLeft + parseFloat(cs.paddingLeft), y: r.top + el.clientTop + parseFloat(cs.paddingTop) };
+};
 K.nextRef = () => nextRef;
 
 // ---------------------------------------------------------------- dom quiet
@@ -427,6 +433,7 @@ function walkEl(n, out, inInter, noText, opts, vw, depth) {
     try { same = !!(n.contentDocument && n.contentDocument.body); } catch (e) {}
     if (!same) {
       node.n = trunc(n.getAttribute('title') || n.getAttribute('src') || '', 80);
+      node.ref = ref(n); // the daemon puts the frame's own snapshot under this line
       node.a = ['cross-origin'];
       out.push(node);
       return;

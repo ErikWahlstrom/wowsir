@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Payment frame</title></head>
+<body style="margin:8px">
+<label>Card number <input id="card"></label>
+<button id="payb">Pay</button>
+<button id="bad">Break</button>
+<button id="load">Load items</button>
+<p id="msg"></p>
+<script>
+  document.getElementById('payb').onclick = () => {
+    const v = document.getElementById('card').value;
+    document.getElementById('msg').textContent = 'Card ending ' + v.slice(-4);
+    parent.postMessage({ paid: v.slice(-4) }, '*');
+  };
+  document.getElementById('bad').onclick = () => { throw new Error('payment frame exploded'); };
+  document.getElementById('load').onclick = async () => {
+    const r = await fetch('/api/items.json');
+    const j = await r.json();
+    document.getElementById('msg').textContent = 'Items: ' + j.items.length;
+  };
+  console.error('frame says hello');
+</script>
+</body></html>

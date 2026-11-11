@@ -51,6 +51,7 @@ Agents that test websites spend most of their tokens and round-trips on two thin
 - **Fast and parallel.**
   - A daemon keeps one Chromium (`chrome-headless-shell` when available) alive. Cold start is about 0.4 s. On a warm browser, a snapshot takes about 10–40 ms and an action about 30–60 ms, including waiting for the page to settle.
   - Each `-s session` is an isolated browser context with its own cookies and storage, created in about 10 ms inside the same browser. In testing, 8 parallel login tests finished in 0.63 s.
+- **Frames, shadow DOM and workers.** Same-origin and cross-origin iframes (payment and sign-in widgets) appear in the snapshot under their `iframe` line, and their refs work like any other: wowsir fills and clicks inside them with real input. Open and closed shadow roots are walked too. Errors from cross-origin frames and web workers are reported with where they came from: `! uncaught … (in iframe pay.example.com)`, `(in worker sync.js)`. Mocks apply inside frames.
 - **Real input.** Clicks are trusted CDP mouse events. Before clicking, wowsir checks that the element is visible, enabled, not covered, and not moving, then re-measures after moving the mouse. The page library runs in an isolated JS world that page scripts can't see or break.
 
 ## Install
@@ -193,7 +194,7 @@ wowsir (CLI, sync, ~1ms) ──unix socket──▶ wowsir daemon (tokio)
 
 ## Limits / TODO
 
-- Cross-origin iframes are listed but not traversed (same-origin iframes are).
+- Inside a cross-origin iframe, `watch`, `screenshot --el` and `html` see only the outer page; frames nested inside a cross-origin frame are not walked.
 - Unix only (macOS/Linux): it uses fd passing and unix sockets.
 
 ## Dev

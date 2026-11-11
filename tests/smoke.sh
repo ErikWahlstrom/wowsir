@@ -7,7 +7,7 @@ K=./target/release/wowsir
 PORT=8765
 # own home = own daemon (always this build) and no saved logins from the user's machine
 export WOWSIR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/wowsir-smoke.XXXXXX")"
-(cd tests/fixtures && python3 -m http.server $PORT >/dev/null 2>&1) & SRV=$!
+python3 -m http.server $PORT --directory tests/fixtures >/dev/null 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null; $K stop >/dev/null 2>&1; rm -rf "$WOWSIR_HOME"' EXIT
 for _ in $(seq 50); do curl -s -o /dev/null localhost:$PORT && break; sleep 0.1; done
 cd tests

@@ -49,6 +49,8 @@ pub struct Req {
     method: String,
     url: String,
     rtype: String,
+    /// frame that made the request
+    frame: String,
     start: Instant,
     status: i64,
 }
@@ -115,6 +117,12 @@ pub struct State {
     /// increments on every new main-frame document (not on pushState)
     pub doc_seq: u64,
     pub world: Option<i64>,
+    /// cross-origin iframes and workers attached under this page (their own CDP sessions)
+    pub children: Vec<Child>,
+    /// wowsir's isolated world per cross-origin frame: frame id -> (session id, context id)
+    pub frame_worlds: HashMap<String, (String, i64)>,
+    /// the page has shown a cross-origin iframe: route lookups into frames too
+    pub xframes: bool,
     pub dialog_accept: bool,
     /// text typed into prompt() dialogs (`dialog accept TEXT`)
     pub dialog_text: Option<String>,
@@ -139,6 +147,9 @@ impl State {
             doc_status: 0,
             doc_seq: 0,
             world: None,
+            children: vec![],
+            frame_worlds: HashMap::new(),
+            xframes: false,
             dialog_accept: true,
             dialog_text: None,
             block_types: vec![],
@@ -159,6 +170,14 @@ impl State {
             .collect()
     }
 
+    /// note_error, tagged with the iframe/worker it came from
+    fn note_error_in(&mut self, label: &Option<String>, s: String) {
+        match label {
+            Some(l) => self.note_error(format!("{s} (in {l})")),
+            None => self.note_error(s),
+        }
+    }
+
     fn note_error(&mut self, s: String) {
         self.events.push(s.clone());
         if self.errors.len() < 200 {
@@ -169,6 +188,134 @@ impl State {
     pub fn short_url(&self, u: &str) -> String {
         short_url(&self.url, u)
     }
+}
+
+/// Insert a frame's snapshot lines under its <iframe @eN> line, indented one level deeper
+/// (at the end if the iframe line was filtered out).
+fn splice(lines: &mut Vec<String>, owner: u64, sub: &[String]) {
+    if sub.is_empty() {
+        return;
+    }
+    let tag = format!("@e{owner}");
+    let at = lines.iter().position(|l| l.split_whitespace().any(|w| w == tag));
+    let (idx, pad) = match at {
+        Some(i) => (i + 1, " ".repeat(lines[i].len() - lines[i].trim_start().len() + 2)),
+        None => (lines.len(), String::new()),
+    };
+    let ins: Vec<String> = sub.iter().map(|l| format!("{pad}{l}")).collect();
+    lines.splice(idx..idx, ins);
+}
+
+/// A cross-origin iframe (out-of-process) or a worker, attached through Target.setAutoAttach.
+#[derive(Clone, Debug)]
+pub struct Child {
+    pub sid: String,
+    pub target: String,
+    /// session id of the page or frame it belongs to
+    pub parent: String,
+    /// "iframe" | "worker" | "shared_worker"
+    pub kind: String,
+}
+
+/// A cross-origin iframe wowsir can look into: its frame id plus the CDP session
+/// that runs it (the page's own session in chrome-headless-shell, which keeps
+/// cross-origin frames in-process; the frame's own session when it is out-of-process).
+#[derive(Clone, Debug)]
+pub struct XFrame {
+    pub frame_id: String,
+    pub sid: String,
+}
+
+/// Mocks and blocked resource types for one session (the page, or an out-of-process frame).
+async fn fetch_setup(cdp: &Arc<Cdp>, sid: &str, st: &Arc<Mutex<State>>) -> Result<()> {
+    let (patterns, mocking): (Vec<Value>, bool) = {
+        let s = st.lock().unwrap();
+        (
+            s.block_types
+                .iter()
+                .map(|t| json!({ "resourceType": t, "requestStage": "Request" }))
+                .chain(s.mocks.iter().map(|m| json!({ "urlPattern": url_glob(&m.pattern), "requestStage": "Request" })))
+                .collect(),
+            !s.mocks.is_empty(),
+        )
+    };
+    let _ = cdp.call(Some(sid), "Network.setCacheDisabled", json!({ "cacheDisabled": mocking })).await;
+    if patterns.is_empty() {
+        cdp.call(Some(sid), "Fetch.disable", json!({})).await?;
+    } else {
+        cdp.call(Some(sid), "Fetch.enable", json!({ "patterns": patterns })).await?;
+    }
+    Ok(())
+}
+
+/// Children start paused until listeners (and mocks) are set up, then attach_child resumes them.
+fn auto_attach() -> Value {
+    json!({ "autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+            "filter": [{ "type": "iframe" }, { "type": "worker" }, { "type": "shared_worker" }, { "exclude": true }] })
+}
+
+/// "iframe pay.example.com" / "worker sw.js": where an error came from
+fn child_label(kind: &str, url: &str) -> String {
+    let rest = url.split("://").nth(1).unwrap_or(url);
+    let what = if kind == "iframe" {
+        rest.split(['/', '?', '#']).next().unwrap_or(rest).to_string()
+    } else {
+        let path = rest.split(['?', '#']).next().unwrap_or(rest);
+        path.rsplit('/').next().filter(|f| !f.is_empty()).unwrap_or(path).to_string()
+    };
+    format!("{} {}", if kind == "iframe" { "iframe" } else { "worker" }, clip(&what, 60))
+}
+
+/// Set up a child session reported by Target.attachedToTarget: forward its errors,
+/// network and dialogs into the page's state; frames auto-attach their own children.
+fn attach_child(cdp: Arc<Cdp>, parent: String, st: Arc<Mutex<State>>, p: Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> {
+    Box::pin(async move {
+        let Some(csid) = p["sessionId"].as_str().map(String::from) else { return };
+        let info = &p["targetInfo"];
+        let kind = info["type"].as_str().unwrap_or("").to_string();
+        let target = info["targetId"].as_str().unwrap_or("").to_string();
+        let url = info["url"].as_str().unwrap_or("").to_string();
+        let label = child_label(&kind, &url);
+        {
+            let mut s = st.lock().unwrap();
+            s.children.push(Child { sid: csid.clone(), target: target.clone(), parent, kind: kind.clone() });
+            if kind == "iframe" {
+                // an out-of-process frame's document request starts on the parent and
+                // finishes in the frame's own session
+                s.inflight.retain(|_, r| !(r.frame == target && r.rtype == "Document"));
+                s.last_net_change = Instant::now();
+            } else if !url.is_empty() {
+                // the worker's script request started on the page but finishes in the worker's
+                // own session (often before we listen there): a running worker means it loaded
+                s.inflight.retain(|_, r| r.url != url);
+                s.last_net_change = Instant::now();
+            }
+        }
+        let rx = cdp.subscribe(&csid);
+        let label = Arc::new(Mutex::new(label));
+        tokio::spawn(event_loop(cdp.clone(), csid.clone(), target, st.clone(), rx, Some(label.clone())));
+        let s = Some(csid.as_str());
+        // name the frame first: Runtime.enable replays console messages logged before we attached
+        if kind == "iframe" {
+            let _ = cdp.call(s, "Page.enable", json!({})).await;
+            if let Ok(t) = cdp.call(s, "Page.getFrameTree", json!({})).await {
+                if let Some(u) = t["frameTree"]["frame"]["url"].as_str().filter(|u| !u.is_empty()) {
+                    *label.lock().unwrap() = child_label("iframe", u);
+                }
+            }
+            let _ = cdp.call(s, "Target.setAutoAttach", auto_attach()).await;
+        }
+        let _ = cdp.call(s, "Runtime.enable", json!({})).await;
+        let _ = cdp.call(s, "Network.enable", json!({})).await;
+        let _ = cdp.call(s, "Log.enable", json!({})).await;
+        if kind == "iframe" {
+            let active = { let x = st.lock().unwrap(); !x.mocks.is_empty() || !x.block_types.is_empty() };
+            if active {
+                let _ = fetch_setup(&cdp, &csid, &st).await;
+            }
+        }
+        let _ = cdp.call(s, "Runtime.runIfWaitingForDebugger", json!({})).await;
+    })
 }
 
 pub fn short_url(page: &str, u: &str) -> String {
@@ -277,7 +424,7 @@ async fn attach_page(cdp: &Arc<Cdp>, target: &str) -> Result<(String, Arc<Mutex<
         .to_string();
     let rx = cdp.subscribe(&sid);
     let st = Arc::new(Mutex::new(State::new()));
-    tokio::spawn(event_loop(cdp.clone(), sid.clone(), target.to_string(), st.clone(), rx));
+    tokio::spawn(event_loop(cdp.clone(), sid.clone(), target.to_string(), st.clone(), rx, None));
     let s = Some(sid.as_str());
     tokio::try_join!(
         cdp.call(s, "Page.enable", json!({})),
@@ -292,6 +439,8 @@ async fn attach_page(cdp: &Arc<Cdp>, target: &str) -> Result<(String, Arc<Mutex<
         cdp.call(s, "Emulation.setFocusEmulationEnabled", json!({ "enabled": true })),
         cdp.call(s, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": TIMER_SHIM })),
     )?;
+    // cross-origin iframes and workers run in other processes: attach to them too
+    let _ = cdp.call(s, "Target.setAutoAttach", auto_attach()).await;
     Ok((sid, st))
 }
 
@@ -378,19 +527,67 @@ impl Session {
 
     /// Evaluate an expression in wowsir's isolated world. Retries across navigations.
     pub async fn js(&mut self, expr: &str) -> Result<Value> {
+        self.js_at(None, expr).await
+    }
+
+    /// wowsir's isolated world inside a cross-origin frame (created and loaded on first use).
+    async fn frame_world(&mut self, f: &XFrame) -> Result<i64> {
+        if let Some((_, id)) = self.st.lock().unwrap().frame_worlds.get(&f.frame_id) {
+            return Ok(*id);
+        }
+        let r = self
+            .cdp
+            .call(Some(&f.sid), "Page.createIsolatedWorld", json!({ "frameId": f.frame_id, "worldName": "wowsir", "grantUniveralAccess": true }))
+            .await?;
+        let id = r["executionContextId"].as_i64().ok_or_else(|| anyhow!("no isolated world in frame"))?;
+        let r = self
+            .cdp
+            .call(Some(&f.sid), "Runtime.evaluate", json!({ "expression": format!("{LIB}\n__wowsir.init({});", self.next_ref), "contextId": id }))
+            .await?;
+        if let Some(ex) = r.get("exceptionDetails") {
+            bail!("failed to inject page library into frame: {}", exception_text(ex));
+        }
+        self.st.lock().unwrap().frame_worlds.insert(f.frame_id.clone(), (f.sid.clone(), id));
+        Ok(id)
+    }
+
+    /// Evaluate in the page's world (frame None) or in a cross-origin frame's world.
+    /// Once frames are involved, every call keeps the @e counter shared across worlds.
+    async fn js_at(&mut self, frame: Option<&XFrame>, expr: &str) -> Result<Value> {
+        let sync = frame.is_some() || self.st.lock().unwrap().xframes;
+        let expr = if sync {
+            format!("(async () => {{ __wowsir.init({}); const v = await ({expr}); return [v, __wowsir.nextRef()]; }})()", self.next_ref)
+        } else {
+            expr.to_string()
+        };
         for _ in 0..4 {
-            let ctx = self.world().await?;
+            let ctx = match frame {
+                None => self.world().await?,
+                Some(f) => self.frame_world(f).await?,
+            };
+            let sid = frame.map_or(self.sid.clone(), |f| f.sid.clone());
             let r = self
+                .cdp
                 .call(
+                    Some(&sid),
                     "Runtime.evaluate",
                     json!({ "expression": expr, "contextId": ctx, "returnByValue": true, "awaitPromise": true }),
                 )
                 .await;
+            let forget = |me: &mut Self| {
+                let mut st = me.st.lock().unwrap();
+                match frame {
+                    None => st.world = None,
+                    Some(f) => {
+                        st.frame_worlds.remove(&f.frame_id);
+                    }
+                }
+            };
             match r {
                 Err(e) => {
                     let m = e.to_string();
                     if m.contains("context") || m.contains("navigated") || m.contains("Promise was collected") {
-                        self.st.lock().unwrap().world = None;
+                        forget(self);
                         tokio::time::sleep(Duration::from_millis(20)).await;
                         continue;
                     }
@@ -400,16 +597,61 @@ impl Session {
                     if let Some(ex) = v.get("exceptionDetails") {
                         let t = exception_text(ex);
                         if t.contains("__wowsir is not defined") {
-                            self.st.lock().unwrap().world = None;
+                            forget(self);
                             continue;
                         }
                         bail!("{t}");
                     }
-                    return Ok(v["result"].get("value").cloned().unwrap_or(Value::Null));
+                    let val = v["result"].get("value").cloned().unwrap_or(Value::Null);
+                    if sync {
+                        if let Some(n) = val[1].as_u64() {
+                            self.next_ref = self.next_ref.max(n);
+                        }
+                        return Ok(val[0].clone());
+                    }
+                    return Ok(val);
                 }
             }
         }
         bail!("page kept navigating while wowsir tried to read it")
+    }
+
+    /// Cross-origin iframes directly in the page, with the session that runs each.
+    pub async fn xframes(&mut self) -> Vec<XFrame> {
+        let Ok(t) = self.call("Page.getFrameTree", json!({})).await else { return vec![] };
+        let origin = t["frameTree"]["frame"]["securityOrigin"].as_str().unwrap_or("").to_string();
+        let children = self.st.lock().unwrap().children.clone();
+        let mut out = vec![];
+        for c in t["frameTree"]["childFrames"].as_array().cloned().unwrap_or_default() {
+            let f = &c["frame"];
+            let o = f["securityOrigin"].as_str().unwrap_or("");
+            let Some(id) = f["id"].as_str() else { continue };
+            if o == origin || o.is_empty() || o == "null" || o.starts_with("://") {
+                continue; // same-origin (walked directly) or about:blank
+            }
+            let sid = children.iter().find(|k| k.target == id && k.kind == "iframe").map_or(self.sid.clone(), |k| k.sid.clone());
+            out.push(XFrame { frame_id: id.to_string(), sid });
+        }
+        // out-of-process frames the tree didn't list
+        for k in children.iter().filter(|k| k.kind == "iframe" && k.parent == self.sid) {
+            if !out.iter().any(|f| f.frame_id == k.target) {
+                out.push(XFrame { frame_id: k.target.clone(), sid: k.sid.clone() });
+            }
+        }
+        out
+    }
+
+    /// Call `function(){...}` with `this` = the <iframe> element that owns frame `f`, in the page's world.
+    async fn on_frame_owner(&mut self, f: &XFrame, func: &str) -> Result<Value> {
+        let o = self.call("DOM.getFrameOwner", json!({ "frameId": f.frame_id })).await?;
+        let ctx = self.world().await?;
+        let r = self.call("DOM.resolveNode", json!({ "backendNodeId": o["backendNodeId"], "executionContextId": ctx })).await?;
+        let id = r["object"]["objectId"].as_str().ok_or_else(|| anyhow!("frame owner not found"))?.to_string();
+        let v = self
+            .call("Runtime.callFunctionOn", json!({ "functionDeclaration": func, "objectId": id, "returnByValue": true }))
+            .await?;
+        let _ = self.call("Runtime.releaseObject", json!({ "objectId": id })).await;
+        Ok(v["result"]["value"].clone())
     }
 
     /// Like `js` but returns a remote object id (for DOM.setFileInputFiles etc).
@@ -424,10 +666,52 @@ impl Session {
         v["result"]["objectId"].as_str().map(String::from).ok_or_else(|| anyhow!("no object"))
     }
 
-    /// Call `__wowsir.<f>(args...)`.
+    /// Call `__wowsir.<f>(args...)` in the page; if the target isn't there and the page
+    /// has cross-origin iframes, look in those (adding the frame's offset to points).
     pub async fn k(&mut self, f: &str, args: &[Value]) -> Result<Value> {
         let a: Vec<String> = args.iter().map(|v| v.to_string()).collect();
-        self.js(&format!("__wowsir.{f}({})", a.join(","))).await
+        let expr = format!("__wowsir.{f}({})", a.join(","));
+        let r = self.js_at(None, &expr).await;
+        if !self.st.lock().unwrap().xframes || !args.first().is_some_and(|v| v.is_string()) {
+            return r;
+        }
+        let missing = match (&r, f) {
+            (Ok(v), "hasText") => v.as_bool() == Some(false),
+            (Ok(v), "count") => v.as_i64() == Some(0),
+            (Ok(v), "probe") => v["found"] == false,
+            // actionability checks report a missing element as {retry: ...} so callers keep polling
+            (Ok(v), _) => v["retry"].as_str().is_some_and(|m| m.contains("no element matches") || m.contains("stale ref")),
+            (Err(e), _) => {
+                let m = e.to_string();
+                m.contains("no element matches") || m.contains("stale ref")
+            }
+        };
+        if !missing {
+            return r;
+        }
+        for fr in self.xframes().await {
+            let Ok(mut v) = self.js_at(Some(&fr), &expr).await else { continue };
+            if v["retry"].as_str().is_some_and(|m| m.contains("no element matches") || m.contains("stale ref")) {
+                continue;
+            }
+            match f {
+                "probe" if v["found"] == false => continue,
+                "hasText" if v.as_bool() != Some(true) => continue,
+                "count" if v.as_i64().unwrap_or(0) == 0 => continue,
+                "point" | "rect" if v.get("x").is_some() => {
+                    // frame coordinates -> page coordinates (the frame's content box)
+                    let b = self.on_frame_owner(&fr, "function(){ return __wowsir.frameBox(this) }").await?;
+                    for (k, d) in [("x", "x"), ("y", "y")] {
+                        if let Some(n) = v[k].as_f64() {
+                            v[k] = json!(n + b[d].as_f64().unwrap_or(0.0));
+                        }
+                    }
+                }
+                _ => {}
+            }
+            return Ok(v);
+        }
+        r
     }
 
     /// Find closed shadow roots (invisible to page JS) and hand them to the page library.
@@ -484,8 +768,31 @@ impl Session {
 
     pub async fn snapshot(&mut self, opts: Value) -> Result<Snap> {
         let _ = self.register_closed().await;
-        let v = self.k("snapshot", &[opts]).await?;
-        let s: Snap = serde_json::from_value(v)?;
+        let v = self.js_at(None, &format!("__wowsir.snapshot({opts})")).await?;
+        let mut s: Snap = serde_json::from_value(v)?;
+        self.next_ref = self.next_ref.max(s.next); // frames number their refs after the page's
+        let marker = |l: &String| l.trim_start().starts_with("iframe") && l.ends_with("cross-origin");
+        if s.lines.iter().any(marker) || s.base.as_ref().is_some_and(|b| b.iter().any(marker)) {
+            if !self.st.lock().unwrap().xframes {
+                // from now on calls keep the @e counter shared with frames: re-read the page's
+                self.st.lock().unwrap().xframes = true;
+            }
+            let mut sub = opts.clone();
+            if let Some(o) = sub.as_object_mut() {
+                o.remove("in");
+            }
+            for fr in self.xframes().await {
+                let Ok(owner) = self.on_frame_owner(&fr, "function(){ return __wowsir.refOf(this) }").await else { continue };
+                let Some(n) = owner.as_u64() else { continue };
+                let Ok(v) = self.js_at(Some(&fr), &format!("__wowsir.snapshot({sub})")).await else { continue };
+                let Ok(cs) = serde_json::from_value::<Snap>(v) else { continue };
+                splice(&mut s.lines, n, &cs.lines);
+                if let (Some(b), Some(cb)) = (s.base.as_mut(), cs.base.as_ref()) {
+                    splice(b, n, cb);
+                }
+                s.next = s.next.max(cs.next);
+            }
+        }
         if s.next > self.next_ref {
             self.next_ref = s.next;
         }
@@ -705,20 +1012,11 @@ impl Session {
 
     /// One Fetch interception covers both `block` and `mock`.
     async fn apply_fetch(&self) -> Result<()> {
-        let patterns: Vec<Value> = {
-            let s = self.st.lock().unwrap();
-            s.block_types
-                .iter()
-                .map(|t| json!({ "resourceType": t, "requestStage": "Request" }))
-                .chain(s.mocks.iter().map(|m| json!({ "urlPattern": url_glob(&m.pattern), "requestStage": "Request" })))
-                .collect()
-        };
-        let mocking = !self.st.lock().unwrap().mocks.is_empty();
-        let _ = self.call("Network.setCacheDisabled", json!({ "cacheDisabled": mocking })).await;
-        if patterns.is_empty() {
-            self.call("Fetch.disable", json!({})).await?;
-        } else {
-            self.call("Fetch.enable", json!({ "patterns": patterns })).await?;
+        fetch_setup(&self.cdp, &self.sid, &self.st).await?;
+        // out-of-process frames make their own requests
+        let frames: Vec<String> = self.st.lock().unwrap().children.iter().filter(|c| c.kind == "iframe").map(|c| c.sid.clone()).collect();
+        for sid in frames {
+            let _ = fetch_setup(&self.cdp, &sid, &self.st).await;
         }
         Ok(())
     }
@@ -774,10 +1072,40 @@ async fn event_loop(
     target: String,
     st: Arc<Mutex<State>>,
     mut rx: mpsc::UnboundedReceiver<Event>,
+    label: Option<Arc<Mutex<String>>>,
 ) {
+    let child = label.is_some();
     while let Some(ev) = rx.recv().await {
         let p = &ev.params;
+        // a frame is attached before it has a URL: name it once it navigates
+        if let (Some(l), "Page.frameNavigated") = (&label, ev.method.as_str()) {
+            if p["frame"]["id"] == target.as_str() {
+                *l.lock().unwrap() = child_label("iframe", p["frame"]["url"].as_str().unwrap_or(""));
+            }
+        }
+        let lab: Option<String> = label.as_ref().map(|l| l.lock().unwrap().clone());
+        if child
+            && matches!(
+                ev.method.as_str(),
+                "Page.frameNavigated" | "Page.navigatedWithinDocument" | "Page.frameStartedLoading" | "Page.frameStoppedLoading" | "Page.domContentEventFired"
+            )
+        {
+            continue;
+        }
         match ev.method.as_str() {
+            "Page.frameAttached" if !child => {
+                // any iframe may be cross-origin: lookups that miss in the page then try frames
+                st.lock().unwrap().xframes = true;
+            }
+            "Target.attachedToTarget" => {
+                tokio::spawn(attach_child(cdp.clone(), sid.clone(), st.clone(), p.clone()));
+            }
+            "Target.detachedFromTarget" => {
+                if let Some(c) = p["sessionId"].as_str() {
+                    st.lock().unwrap().children.retain(|x| x.sid != c);
+                    cdp.unsubscribe(c);
+                }
+            }
             "Network.requestWillBeSent" => {
                 let id = p["requestId"].as_str().unwrap_or("").to_string();
                 let mut s = st.lock().unwrap();
@@ -791,6 +1119,7 @@ async fn event_loop(
                         method: p["request"]["method"].as_str().unwrap_or("GET").to_string(),
                         url: p["request"]["url"].as_str().unwrap_or("").to_string(),
                         rtype: p["type"].as_str().unwrap_or("Other").to_string(),
+                        frame: p["frameId"].as_str().unwrap_or("").to_string(),
                         start: Instant::now(),
                         status: 0,
                     },
@@ -828,7 +1157,7 @@ async fn event_loop(
                     let blocked = err.contains("BLOCKED_BY_CLIENT") || p["blockedReason"] == "inspector";
                     s.net.push_back(format!("ERR {} {} {} ({err})", r.method, u, r.rtype));
                     if !canceled && !blocked && err != "net::ERR_ABORTED" {
-                        s.note_error(format!("net {} {} failed: {err}", r.method, u));
+                        s.note_error_in(&lab, format!("net {} {} failed: {err}", r.method, u));
                     }
                 } else {
                     let line = format!("{} {} {} {} {ms}ms", r.status, r.method, u, r.rtype);
@@ -838,7 +1167,7 @@ async fn event_loop(
                         s.done.pop_front();
                     }
                     if r.status >= 400 && !r.url.ends_with("/favicon.ico") {
-                        s.note_error(format!("net {} {} {}", r.status, r.method, u));
+                        s.note_error_in(&lab, format!("net {} {} {}", r.status, r.method, u));
                     }
                 }
                 while s.net.len() > 500 {
@@ -856,7 +1185,7 @@ async fn event_loop(
                     s.console.pop_front();
                 }
                 if ty == "error" || ty == "assert" {
-                    s.note_error(format!("console.error: {}", clip(&text, 300)));
+                    s.note_error_in(&lab, format!("console.error: {}", clip(&text, 300)));
                 }
             }
             "Log.entryAdded" => {
@@ -868,8 +1197,9 @@ async fn event_loop(
                 let mut s = st.lock().unwrap();
                 s.console.push_back(format!("[browser {level}] {text}"));
                 // network/javascript entries duplicate what we already report from Network/Runtime
-                if level == "error" && source != "network" && source != "javascript" {
-                    s.note_error(format!("browser: {text}"));
+                // worker errors arrive from the worker's own session (attached), labelled
+                if level == "error" && source != "network" && source != "javascript" && source != "worker" {
+                    s.note_error_in(&lab, format!("browser: {text}"));
                 }
             }
             "Runtime.exceptionThrown" => {
@@ -878,11 +1208,11 @@ async fn event_loop(
                 if let Some(u) = d["url"].as_str().filter(|u| !u.is_empty()) {
                     let mut s = st.lock().unwrap();
                     msg = format!("{msg} ({}:{})", s.short_url(u), d["lineNumber"].as_i64().unwrap_or(0) + 1);
-                    s.note_error(format!("uncaught {}", clip(&msg, 300)));
+                    s.note_error_in(&lab, format!("uncaught {}", clip(&msg, 300)));
                     s.console.push_back(format!("[uncaught] {msg}"));
                 } else {
                     let mut s = st.lock().unwrap();
-                    s.note_error(format!("uncaught {}", clip(&msg, 300)));
+                    s.note_error_in(&lab, format!("uncaught {}", clip(&msg, 300)));
                     s.console.push_back(format!("[uncaught] {msg}"));
                 }
             }
@@ -911,14 +1241,20 @@ async fn event_loop(
                 }
             }
             "Runtime.executionContextsCleared" => {
-                st.lock().unwrap().world = None;
+                let mut s = st.lock().unwrap();
+                if !child {
+                    s.world = None;
+                    s.xframes = false;
+                }
+                s.frame_worlds.retain(|_, (fs, _)| *fs != sid);
             }
             "Runtime.executionContextDestroyed" => {
                 let id = p["executionContextId"].as_i64();
                 let mut s = st.lock().unwrap();
-                if s.world.is_some() && s.world == id {
+                if !child && s.world.is_some() && s.world == id {
                     s.world = None;
                 }
+                s.frame_worlds.retain(|_, (fs, c)| !(*fs == sid && Some(*c) == id));
             }
             "Page.javascriptDialogOpening" => {
                 let (accept, text) = {

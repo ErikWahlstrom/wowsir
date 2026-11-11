@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Frames</title></head>
+<body><main>
+<h1>Checkout</h1>
+<p id="paid">Not paid</p>
+<!-- localhost and 127.0.0.1 are different sites, so Chrome runs this frame in its own process -->
+<iframe id="pay" title="Payment" src="http://127.0.0.1:8765/frame.html" width="420" height="200"></iframe>
+</main>
+<script>
+  addEventListener('message', (e) => { if (e.data && e.data.paid) document.getElementById('paid').textContent = 'Paid ' + e.data.paid; });
+  new Worker('worker.js');
+</script>
+</body></html>
