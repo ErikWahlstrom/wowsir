@@ -5,6 +5,10 @@ expect title Popup
 click button:Approve
 expect title Tabs
 expect text "popup said: signed in"
+click "button:Open popup"
+click "button:Approve now"
+expect title Tabs
+expect text "popup said: closed early"
 click "link:Open misc in new tab"
 expect url misc.html
 tab 0

@@ -19,7 +19,17 @@ pub struct Event {
     pub params: Value,
 }
 
-type Pending = Mutex<HashMap<u64, oneshot::Sender<Result<Value, String>>>>;
+/// Error for commands whose tab/frame closed before answering.
+pub const TARGET_CLOSED: &str = "target closed";
+
+/// True when `e` means the page went away (ours, or Chrome's own wording).
+pub fn is_target_gone(e: &anyhow::Error) -> bool {
+    let m = e.to_string().to_lowercase();
+    m.contains(TARGET_CLOSED) || m.contains("session with given id not found")
+}
+
+/// id -> (session the command was sent to, reply slot)
+type Pending = Mutex<HashMap<u64, (String, oneshot::Sender<Result<Value, String>>)>>;
 
 pub struct Cdp {
     next_id: AtomicU64,
@@ -70,7 +80,7 @@ impl Cdp {
                 buf.drain(..start);
             }
             // browser gone: fail everything pending
-            for (_, tx) in p2.lock().unwrap().drain() {
+            for (_, (_, tx)) in p2.lock().unwrap().drain() {
                 let _ = tx.send(Err("browser connection closed".into()));
             }
             r2.lock().unwrap().clear();
@@ -113,7 +123,10 @@ impl Cdp {
             msg["sessionId"] = json!(s);
         }
         let (tx, rx) = oneshot::channel();
-        self.pending.lock().unwrap().insert(id, tx);
+        self.pending
+            .lock()
+            .unwrap()
+            .insert(id, (session.unwrap_or("").to_string(), tx));
         if self.out.send(serde_json::to_vec(&msg)?).is_err() {
             bail!("browser connection closed");
         }
@@ -138,7 +151,7 @@ fn dispatch(
     routes: &Mutex<HashMap<String, mpsc::UnboundedSender<Event>>>,
 ) {
     if let Some(id) = v.get("id").and_then(|i| i.as_u64()) {
-        if let Some(tx) = pending.lock().unwrap().remove(&id) {
+        if let Some((_, tx)) = pending.lock().unwrap().remove(&id) {
             let r = match v.get("error") {
                 Some(e) => Err(e
                     .get("message")
@@ -154,6 +167,23 @@ fn dispatch(
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
         return;
     };
+    if method == "Target.detachedFromTarget" {
+        // a tab or frame went away (e.g. a popup that closes itself on click):
+        // its unanswered commands will never get a reply, so fail them now
+        if let Some(gone) = v["params"]["sessionId"].as_str() {
+            let mut p = pending.lock().unwrap();
+            let ids: Vec<u64> = p
+                .iter()
+                .filter(|(_, (s, _))| s == gone)
+                .map(|(id, _)| *id)
+                .collect();
+            for id in ids {
+                if let Some((_, tx)) = p.remove(&id) {
+                    let _ = tx.send(Err(TARGET_CLOSED.into()));
+                }
+            }
+        }
+    }
     let session = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("");
     let routes = routes.lock().unwrap();
     if let Some(tx) = routes.get(session) {

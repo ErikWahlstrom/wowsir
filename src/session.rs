@@ -1252,12 +1252,16 @@ impl Session {
             ("mousePressed", "middle") => 4,
             _ => 0,
         };
-        self.call(
+        match self.call(
             "Input.dispatchMouseEvent",
             json!({ "type": kind, "x": x, "y": y, "button": button, "buttons": buttons, "clickCount": count, "modifiers": self.click_mods }),
         )
-        .await?;
-        Ok(())
+        .await
+        {
+            // the click closed the page (window.close() in a handler): it landed
+            Err(e) if crate::cdp::is_target_gone(&e) => Ok(()),
+            r => r.map(|_| ()),
+        }
     }
 
     pub async fn set_blocking(&self, types: Vec<String>) -> Result<()> {
