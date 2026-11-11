@@ -1,6 +1,6 @@
 [package]
 name = "wowsir"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A fast, headless, agent-first browser CLI for testing websites"
 license = "MIT"
@@ -9,6 +9,15 @@ readme = "README.md"
 keywords = ["browser", "testing", "cdp", "mcp", "agents"]
 categories = ["development-tools::testing", "command-line-utilities", "web-programming"]
 include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/skill/SKILL.md"]
+
+# `cargo binstall wowsir` downloads the GitHub release binary instead of compiling
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-v{ version }-{ target }{ archive-suffix }"
+bin-dir = "{ name }-v{ version }-{ target }/{ bin }{ binary-ext }"
+pkg-fmt = "tgz"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [[bin]]
 name = "wowsir"
