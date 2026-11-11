@@ -1,0 +1,6 @@
+# Closed shadow roots (nested) are walked like open ones
+open localhost:8765/closed.html
+expect text 'Members only'
+fill textbox:Code 1234
+click button:Unlock
+expect text 'Unlocked with 1234'

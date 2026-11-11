@@ -5,6 +5,24 @@
 if (globalThis.__wowsir) return;
 const K = (globalThis.__wowsir = {});
 
+// ---------------------------------------------------------------- shadow roots
+// Closed shadow roots are invisible to page JS; the daemon finds them over CDP
+// (DOM.describeNode) and registers them here, so they are walked like open ones.
+const CLOSED = new WeakMap(); // host -> closed ShadowRoot
+const CHECKED = new WeakSet(); // upgraded custom elements already asked about
+const rootOf = (el) => el.shadowRoot || CLOSED.get(el) || null;
+K.addClosed = (host, root) => { CLOSED.set(host, root); CHECKED.add(host); };
+// custom elements that might hide a closed root (asked once each, after they are defined)
+K.closedCandidates = () => {
+  const out = [];
+  for (const el of allElements(document)) {
+    if (!el.localName.includes('-') || rootOf(el) || CHECKED.has(el) || !el.matches(':defined')) continue;
+    CHECKED.add(el);
+    out.push(el);
+  }
+  return out.length ? out : null;
+};
+
 // ---------------------------------------------------------------- refs
 let nextRef = 1;
 const refOf = new WeakMap(); // Element -> n
@@ -49,7 +67,8 @@ const INPUT_ROLE = { button: 'button', submit: 'button', reset: 'button', image:
 const BLOCKISH = (el) => !INLINE.has(el.localName);
 
 function kids(el) {
-  if (el.shadowRoot) return el.shadowRoot.childNodes;
+  const sr = rootOf(el);
+  if (sr) return sr.childNodes;
   if (el.localName === 'slot') {
     const a = el.assignedNodes({ flatten: true });
     return a.length ? a : el.childNodes;
@@ -229,7 +248,7 @@ function headingLevel(el) {
 function deepActive() {
   let a = document.activeElement;
   while (a) {
-    if (a.shadowRoot && a.shadowRoot.activeElement) a = a.shadowRoot.activeElement;
+    if (rootOf(a) && rootOf(a).activeElement) a = rootOf(a).activeElement;
     else if ((a.localName === 'iframe') && (() => { try { return a.contentDocument && a.contentDocument.activeElement; } catch (e) { return null; } })())
       a = a.contentDocument.activeElement;
     else break;
@@ -523,7 +542,8 @@ function* allElements(root) {
     const list = r.querySelectorAll('*');
     for (const el of list) {
       yield el;
-      if (el.shadowRoot) stack.push(el.shadowRoot);
+      const sr = rootOf(el);
+      if (sr) stack.push(sr);
       if (el.localName === 'iframe') { try { if (el.contentDocument) stack.push(el.contentDocument); } catch (e) {} }
     }
   }
@@ -596,7 +616,7 @@ function deepQuery(sel, all) {
 }
 function shadowRoots() {
   const out = [];
-  for (const el of allElements(document)) if (el.shadowRoot) out.push(el.shadowRoot);
+  for (const el of allElements(document)) if (rootOf(el)) out.push(rootOf(el));
   return out;
 }
 
@@ -715,8 +735,8 @@ function frameOffset(el) {
 }
 function hitAt(doc, x, y) {
   let e = doc.elementFromPoint(x, y);
-  while (e && e.shadowRoot) {
-    const i = e.shadowRoot.elementFromPoint(x, y);
+  while (e && rootOf(e)) {
+    const i = rootOf(e).elementFromPoint(x, y);
     if (!i || i === e) break;
     e = i;
   }

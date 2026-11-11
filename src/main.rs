@@ -49,7 +49,7 @@ SESSIONS   -s NAME / WOWSIR_SESSION=NAME (isolated cookies/storage; parallel-saf
 TARGETS (T)  @e12               ref from a snapshot (stable while the element lives)
              button:Sign in     role:name — link:, textbox:, checkbox:, combobox:, h1:, ...
              text=Forgot password
-             #id / .class / [data-testid=x]   any CSS selector (pierces open shadow DOM)
+             #id / .class / [data-testid=x]   any CSS selector (pierces open and closed shadow DOM)
                                 quote '#id' in the shell: unquoted, # starts a shell comment
              A >> B             B near A: inside it, else the first after it in its section
                                 ("h2:Shipping >> checkbox:Gift wrap", "text=Unsaved >> button:Discard")
@@ -372,7 +372,9 @@ fn send(req: &Req, autostart: bool) -> Result<Resp, String> {
         Err(_) if autostart => start_daemon(req.headed)?,
         Err(e) => return Err(e.to_string()),
     };
-    let mut body = serde_json::to_vec(req).map_err(|e| e.to_string())?;
+    let mut req = req.clone();
+    req.build = daemon::build_id();
+    let mut body = serde_json::to_vec(&req).map_err(|e| e.to_string())?;
     body.push(b'\n');
     stream.write_all(&body).map_err(|e| e.to_string())?;
     let mut line = String::new();

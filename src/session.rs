@@ -430,7 +430,60 @@ impl Session {
         self.js(&format!("__wowsir.{f}({})", a.join(","))).await
     }
 
+    /// Find closed shadow roots (invisible to page JS) and hand them to the page library.
+    /// Only defined custom elements without an open root are asked about, once each.
+    pub async fn register_closed(&mut self) -> Result<()> {
+        for _ in 0..4 {
+            // nested closed roots show up once their host's root is registered: loop a few rounds
+            let ctx = self.world().await?;
+            let v = self
+                .call("Runtime.evaluate", json!({ "expression": "__wowsir.closedCandidates()", "contextId": ctx, "returnByValue": false }))
+                .await?;
+            let Some(arr) = v["result"]["objectId"].as_str().map(String::from) else { return Ok(()) };
+            let props = self.call("Runtime.getProperties", json!({ "objectId": arr, "ownProperties": true })).await?;
+            let hosts: Vec<String> = props["result"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter(|p| p["name"].as_str().is_some_and(|n| n.parse::<u32>().is_ok()))
+                        .filter_map(|p| p["value"]["objectId"].as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let mut found = false;
+            for host in hosts {
+                let Ok(d) = self.call("DOM.describeNode", json!({ "objectId": host, "depth": 1, "pierce": true })).await else { continue };
+                for sr in d["node"]["shadowRoots"].as_array().cloned().unwrap_or_default() {
+                    if sr["shadowRootType"] != "closed" {
+                        continue;
+                    }
+                    let Ok(r) = self
+                        .call("DOM.resolveNode", json!({ "backendNodeId": sr["backendNodeId"], "executionContextId": ctx }))
+                        .await
+                    else {
+                        continue;
+                    };
+                    if let Some(rid) = r["object"]["objectId"].as_str() {
+                        self.call(
+                            "Runtime.callFunctionOn",
+                            json!({ "functionDeclaration": "function(r){ __wowsir.addClosed(this, r) }", "objectId": host,
+                                    "arguments": [{ "objectId": rid }] }),
+                        )
+                        .await?;
+                        found = true;
+                    }
+                }
+            }
+            let _ = self.call("Runtime.releaseObject", json!({ "objectId": arr })).await;
+            if !found {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
     pub async fn snapshot(&mut self, opts: Value) -> Result<Snap> {
+        let _ = self.register_closed().await;
         let v = self.k("snapshot", &[opts]).await?;
         let s: Snap = serde_json::from_value(v)?;
         if s.next > self.next_ref {

@@ -1,0 +1,23 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Closed shadow</title></head>
+<body><main><h1>Closed shadow roots</h1>
+<x-signin></x-signin>
+<p id="out"></p>
+</main>
+<script>
+  // a widget whose shadow root page scripts (and test tools) can't reach
+  customElements.define('x-badge', class extends HTMLElement {
+    constructor() { super(); this.attachShadow({ mode: 'closed' }).innerHTML = '<strong>Members only</strong>'; }
+  });
+  customElements.define('x-signin', class extends HTMLElement {
+    constructor() {
+      super();
+      const r = this.attachShadow({ mode: 'closed' });
+      r.innerHTML = '<x-badge></x-badge><label>Code <input id="code"></label><button>Unlock</button>';
+      r.querySelector('button').onclick = () => {
+        document.getElementById('out').textContent = 'Unlocked with ' + r.querySelector('input').value;
+      };
+    }
+  });
+</script>
+</body></html>

@@ -83,7 +83,7 @@ wowsir help
 | Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` |
 | Sessions | `-s NAME` / `WOWSIR_SESSION` · `sessions` · `close` · `stop` · `status` |
 
-**Targets:** `@e12` (snapshot ref) · `button:Sign in` (role:name, case-insensitive, exact before partial) · `text=Forgot password` · any CSS selector (pierces open shadow DOM) · `A >> B` (B near A: inside it, or the first one after it in its section).
+**Targets:** `@e12` (snapshot ref) · `button:Sign in` (role:name, case-insensitive, exact before partial) · `text=Forgot password` · any CSS selector (pierces open and closed shadow DOM) · `A >> B` (B near A: inside it, or the first one after it in its section).
 
 **Global flags:** `-q` (no diff) · `--snap` (full snapshot instead of diff) · `--timeout MS` · `--headed`.
 
@@ -194,7 +194,6 @@ wowsir (CLI, sync, ~1ms) ──unix socket──▶ wowsir daemon (tokio)
 ## Limits / TODO
 
 - Cross-origin iframes are listed but not traversed (same-origin iframes are).
-- Closed shadow roots are not traversed (open ones are).
 - Unix only (macOS/Linux): it uses fd passing and unix sockets.
 
 ## Dev

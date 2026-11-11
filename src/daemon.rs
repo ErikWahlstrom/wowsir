@@ -53,6 +53,21 @@ pub struct Req {
     /// don't load saved logins into a newly created session
     #[serde(default)]
     pub no_auth: bool,
+    /// the client's build_id(): a daemon started from another build says so
+    #[serde(default)]
+    pub build: String,
+}
+
+/// Identifies the installed binary (mtime + size), so a daemon left running
+/// across an upgrade can tell that it is out of date.
+pub fn build_id() -> String {
+    std::env::current_exe()
+        .and_then(std::fs::metadata)
+        .map(|m| {
+            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+            format!("{t}-{}", m.len())
+        })
+        .unwrap_or_default()
 }
 
 #[derive(Deserialize, Serialize)]
@@ -68,6 +83,9 @@ struct Daemon {
     /// browserContextId -> that session's tab event queue
     contexts: Arc<std::sync::Mutex<HashMap<String, Arc<std::sync::Mutex<Vec<TabEvent>>>>>>,
     last_used: std::sync::Mutex<Instant>,
+    build: String,
+    /// sessions already told that the daemon is older than the client
+    warned: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 pub async fn run(headed: bool) -> Result<()> {
@@ -89,6 +107,8 @@ pub async fn run(headed: bool) -> Result<()> {
         headed,
         contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
         last_used: std::sync::Mutex::new(Instant::now()),
+        build: build_id(),
+        warned: Default::default(),
     });
     // warm the browser immediately; the first command is already on its way
     {
@@ -209,7 +229,11 @@ impl Daemon {
         BufReader::new(r).read_line(&mut line).await?;
         let req: Req = serde_json::from_str(&line)?;
         *self.last_used.lock().unwrap() = Instant::now();
-        let resp = self.process(req).await;
+        let stale = !req.build.is_empty() && req.build != self.build && self.warned.lock().unwrap().insert(req.session.clone());
+        let mut resp = self.process(req).await;
+        if stale && resp.code != 99 {
+            resp.out.push_str("\n! wowsir was updated after this daemon started, so commands still run the old version. `wowsir stop` switches to the new one (it ends running sessions, including other agents').");
+        }
         if resp.code == 99 {
             let _ = std::fs::remove_file(sock_path());
         }
