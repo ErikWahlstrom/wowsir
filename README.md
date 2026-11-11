@@ -59,10 +59,10 @@ Agents that test websites spend most of their tokens and round-trips on two thin
 Runs on macOS, Linux and Windows.
 
 ```sh
-cargo install --git https://github.com/ErikWahlstrom/wowsir
+cargo install wowsir
 ```
 
-Or download a binary for your platform from [Releases](https://github.com/ErikWahlstrom/wowsir/releases) and put it on your `PATH`.
+Or download a binary for your platform from [Releases](https://github.com/ErikWahlstrom/wowsir/releases) and put it on your `PATH`. The latest unreleased code: `cargo install --git https://github.com/ErikWahlstrom/wowsir`.
 
 wowsir needs a Chromium-based browser. It uses Playwright's `chrome-headless-shell` if present (fastest), else Chrome, Chromium or Edge (on Windows, Edge is always there):
 
