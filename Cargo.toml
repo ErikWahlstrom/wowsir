@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "A fast, headless, agent-first browser CLI for testing websites"
 license = "MIT"
+repository = "https://github.com/ErikWahlstrom/wowsir"
+readme = "README.md"
+keywords = ["browser", "testing", "cdp", "mcp", "agents"]
+categories = ["development-tools::testing", "command-line-utilities", "web-programming"]
+include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/skill/SKILL.md"]
 
 [[bin]]
 name = "wowsir"

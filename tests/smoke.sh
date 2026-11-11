@@ -11,7 +11,13 @@ export WOWSIR_AUTH_DIR="$WOWSIR_HOME/auth"
 PY=$(command -v python3 || command -v python)   # Windows runners only have `python`
 "$PY" -m http.server $PORT --directory tests/fixtures >/dev/null 2>&1 & SRV=$!
 trap 'kill $SRV 2>/dev/null; "$K" stop >/dev/null 2>&1; rm -rf "$WOWSIR_HOME"' EXIT
-for _ in $(seq 50); do curl -s -o /dev/null localhost:$PORT && break; sleep 0.1; done
+# Python starts slowly on Windows runners: wait (both names the tests use), and fail loudly
+ready=""
+for _ in $(seq 300); do
+  if curl -s -o /dev/null "http://localhost:$PORT/index.html" && curl -s -o /dev/null "http://127.0.0.1:$PORT/index.html"; then ready=1; break; fi
+  sleep 0.1
+done
+[ -n "$ready" ] || { echo "fixture server did not start on port $PORT"; exit 1; }
 cd tests
 # each file in its own fresh session, all at once
 "$K" -s smoke -q run *.wowsir --parallel 8
