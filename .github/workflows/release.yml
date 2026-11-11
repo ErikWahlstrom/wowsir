@@ -7,7 +7,17 @@ permissions:
   contents: write
 
 jobs:
+  # crates.io versions are permanent: refuse a tag that doesn't match Cargo.toml
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $v"; exit 1; }
+
   build:
+    needs: check
     strategy:
       fail-fast: false
       matrix:
@@ -50,3 +60,21 @@ jobs:
       - run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes
         env:
           GH_TOKEN: ${{ github.token }}
+
+  # Trusted Publishing: crates.io trusts this workflow in the crates-io environment
+  # (v* tags only), so no long-lived token is stored anywhere
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - run: cargo publish --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
