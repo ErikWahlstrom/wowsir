@@ -1,0 +1,17 @@
+<!doctype html>
+<title>Select</title>
+<ul>
+  <li><button class="it">Alpha</button></li>
+  <li><button class="it">Beta</button></li>
+  <li><button class="it">Gamma</button></li>
+</ul>
+<p id="sel">selected: none</p>
+<script>
+const chosen = new Set();
+document.querySelectorAll('.it').forEach(b => b.addEventListener('click', e => {
+  if (e.ctrlKey || e.metaKey) { chosen.has(b.textContent) ? chosen.delete(b.textContent) : chosen.add(b.textContent); }
+  else if (e.shiftKey) { ['Alpha','Beta','Gamma'].forEach(n => chosen.add(n)); }
+  else { chosen.clear(); chosen.add(b.textContent); }
+  document.getElementById('sel').textContent = 'selected: ' + ([...chosen].join(', ') || 'none');
+}));
+</script>

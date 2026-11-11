@@ -1,0 +1,23 @@
+<!doctype html>
+<title>Layout</title>
+<style>
+  body { margin: 0; font: 16px sans-serif; }
+  #bar { position: fixed; bottom: 0; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; background: #eee; }
+  #stepper { display: flex; gap: 8px; padding: 8px; }
+</style>
+<h1>Stepper</h1>
+<div id="bar">
+  <div id="stepper">
+    <button id="prev">Previous</button><span id="label">Frame 1</span><button id="next">Next</button>
+  </div>
+  <div id="footer"></div>
+</div>
+<script>
+  let n = 1;
+  const label = document.getElementById('label'), footer = document.getElementById('footer');
+  document.getElementById('next').onclick = () => { n++; label.textContent = 'Frame ' + n; };
+  document.getElementById('prev').onclick = () => { n = Math.max(1, n - 1); label.textContent = 'Frame ' + n; };
+  // "Checking…" briefly adds a footer line, which pushes the stepper up and back
+  window.check = () => { footer.textContent = 'Checking forecast…'; setTimeout(() => { footer.textContent = ''; }, 300); };
+  window.note = () => { footer.textContent = 'Shared time unavailable'; };
+</script>

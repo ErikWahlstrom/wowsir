@@ -1,0 +1,12 @@
+# modifier clicks and response bodies
+open localhost:8765/select.html
+click button:Alpha
+click button:Gamma --mod
+expect text "selected: Alpha, Gamma"
+click button:Beta
+expect text "selected: Beta"
+click button:Alpha --shift
+expect text "selected: Beta, Alpha, Gamma"
+open localhost:8765/data.html
+expect text beta
+net --body items.json

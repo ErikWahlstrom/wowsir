@@ -1,0 +1,56 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Acme Login</title>
+<style>
+  body { font-family: sans-serif; }
+  .hidden { display: none; }
+  .card { cursor: pointer; border: 1px solid #ccc; padding: 8px; margin: 4px; }
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.4); }
+  .sr { position: absolute; opacity: 0; width: 1px; height: 1px; }
+</style></head>
+<body>
+<header><nav aria-label="Main"><a href="/">Home</a> <a href="/pricing">Pricing</a> <a href="/docs">Docs</a></nav></header>
+<main>
+  <section id="login">
+    <h1>Sign in to Acme</h1>
+    <p>Use your work email. <a href="/forgot">Forgot password?</a></p>
+    <form id="f">
+      <label>Email <input type="email" name="email" required placeholder="you@company.com"></label>
+      <label for="pw">Password</label><input id="pw" type="password" required>
+      <label><input type="checkbox" class="sr" id="remember"> Remember me</label>
+      <label>Country <select name="country"><option>Sweden</option><option>Norway</option><option>Finland</option></select></label>
+      <button type="submit" data-testid="submit">Sign in</button>
+    </form>
+    <p id="err" role="alert" class="hidden"></p>
+  </section>
+  <section id="dash" class="hidden">
+    <h1 id="welcome"></h1>
+    <div class="card" onclick="this.textContent='Opened!'">Open project Apollo</div>
+    <table>
+      <tr><th>Name</th><th>Status</th><th></th></tr>
+      <tr><td>Apollo</td><td>Active</td><td><button>Delete</button></td></tr>
+      <tr><td>Gemini</td><td>Paused</td><td><button>Delete</button></td></tr>
+    </table>
+    <button id="broken" onclick="undefinedFn()">Broken button</button>
+    <button onclick="if(confirm('Really?')) document.getElementById('st').textContent='Confirmed'">Confirm thing</button>
+    <span id="st"></span>
+    <button onclick="document.getElementById('dlg').showModal()">Open settings</button>
+    <dialog id="dlg"><h2>Settings</h2><label><input type="checkbox" checked> Dark mode</label><button onclick="this.closest('dialog').close()">Close</button></dialog>
+    <a href="/does-not-exist">Broken link</a>
+  </section>
+</main>
+<footer>© Acme</footer>
+<script>
+document.querySelectorAll('tr button').forEach(b => b.onclick = () => b.closest('tr').remove());
+document.getElementById('f').onsubmit = async (e) => {
+  e.preventDefault();
+  const email = e.target.email.value, pw = document.getElementById('pw').value;
+  if (pw !== 'hunter2') { const er = document.getElementById('err'); er.textContent = 'Wrong password'; er.classList.remove('hidden'); return; }
+  await fetch('/api/login-' + Date.now()).catch(() => {});
+  await new Promise(r => setTimeout(r, 120));
+  document.getElementById('login').classList.add('hidden');
+  document.getElementById('dash').classList.remove('hidden');
+  document.getElementById('welcome').textContent = 'Welcome, ' + email;
+  history.pushState({}, '', '/dashboard');
+};
+</script>
+</body></html>

@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Misc</title>
+<style>.tip{display:none} #h:hover + .tip{display:block} #cover{position:fixed;top:0;left:0;width:300px;height:200px;background:#eee}</style></head>
+<body>
+<button id="h">Hover me</button><div class="tip">Tooltip text</div>
+<input id="search" aria-label="Search" oninput="clearTimeout(window.t);window.t=setTimeout(()=>{document.getElementById('res').textContent='Results for '+this.value},300)">
+<div id="res"></div>
+<input type="file" id="file" aria-label="Avatar" onchange="document.getElementById('fn').textContent=this.files[0].name"><span id="fn"></span>
+<textarea aria-label="Notes" onkeydown="if(event.key==='Enter'&&event.metaKey)document.getElementById('sent').textContent='sent!'"></textarea><span id="sent"></span>
+<my-widget></my-widget>
+<div style="height:3000px"></div>
+<button id="far" onclick="this.textContent='Far clicked'">Far away button</button>
+<script>
+customElements.define('my-widget', class extends HTMLElement { connectedCallback(){ const r=this.attachShadow({mode:'open'}); r.innerHTML='<button>Shadow button</button><span>in shadow</span>'; r.querySelector('button').onclick=()=>r.querySelector('span').textContent='shadow clicked'; } });
+console.log('hello', {a:1, b:'x'}); console.warn('careful');
+</script></body></html>

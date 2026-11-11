@@ -1,0 +1,9 @@
+# kite test — recorded default
+# run with: kite run tests/login.kite
+open localhost:8765
+fill textbox:Email user@example.com
+fill textbox:Password hunter2
+check 'checkbox:Remember me'
+select combobox:Country Finland
+click '[data-testid="submit"]'
+expect text 'Welcome, user'

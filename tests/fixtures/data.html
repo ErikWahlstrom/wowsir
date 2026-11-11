@@ -1,0 +1,20 @@
+<!doctype html>
+<title>Data</title>
+<h1>Items</h1>
+<button onclick="load()">Refresh</button>
+<div id="out"></div>
+<script>
+async function load() {
+  const out = document.getElementById('out');
+  out.textContent = 'Loading…';
+  try {
+    const r = await fetch('api/items.json');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const { items } = await r.json();
+    out.innerHTML = items.length ? '<ul>' + items.map(i => '<li>' + i + '</li>').join('') + '</ul>' : '<p>No items yet</p>';
+  } catch (e) {
+    out.textContent = 'Could not load items (' + e.message + ')';
+  }
+}
+load();
+</script>

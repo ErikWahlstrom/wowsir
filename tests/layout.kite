@@ -1,0 +1,7 @@
+# layout stability: watched controls must not move while stepping
+open localhost:8765/layout.html
+watch button:Previous button:Next
+click button:Next
+click button:Next
+click button:Previous
+expect still

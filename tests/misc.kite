@@ -1,0 +1,15 @@
+# exercises hover, debounced input, shadow DOM, uploads, keyboard, scrolling
+open localhost:8765/misc.html
+hover "#h"
+expect visible "text=Tooltip text"
+fill textbox:Search kite
+expect text "Results for kite"
+click "button:Shadow button"
+expect text "shadow clicked"
+upload button:Avatar ../Cargo.toml
+expect text Cargo.toml
+type textbox:Notes hello
+press Meta+Enter
+expect text sent!
+click "#far"
+expect text "Far clicked"

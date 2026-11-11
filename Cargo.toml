@@ -1,0 +1,27 @@
+[package]
+name = "kite"
+version = "0.1.0"
+edition = "2021"
+description = "A fast, headless, agent-first browser CLI for testing websites"
+license = "MIT"
+
+[[bin]]
+name = "kite"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+similar = "2"
+shell-words = "1"
+libc = "0.2"
+base64 = "0.22"
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true

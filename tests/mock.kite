@@ -1,0 +1,19 @@
+# network mocking: error, empty and offline states without touching the backend
+open localhost:8765/data.html
+expect text beta
+mock /api/items 500
+click button:Refresh
+expect text "Could not load items (HTTP 500)"
+mock /api/items --json '{"items":[]}'
+click button:Refresh
+expect text "No items yet"
+mock /api/items abort
+click button:Refresh
+expect text "Could not load items (Failed to fetch)"
+mock /api/items --delay 800
+click button:Refresh
+expect text Loading
+expect text alpha
+mock off
+click button:Refresh
+expect text beta

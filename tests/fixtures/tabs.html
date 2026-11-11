@@ -1,0 +1,8 @@
+<!doctype html>
+<title>Tabs</title>
+<h1>Opener</h1>
+<a href="misc.html" target="_blank">Open misc in new tab</a>
+<button onclick="window.open('popup.html', 'pop', 'width=400,height=300')">Open popup</button>
+<button onclick="setTimeout(() => window.open('popup.html'), 300)">Open popup later</button>
+<p id="msg">waiting</p>
+<script>window.addEventListener('message', e => { document.getElementById('msg').textContent = 'popup said: ' + e.data; });</script>
