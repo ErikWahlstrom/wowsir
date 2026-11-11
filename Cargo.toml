@@ -1,12 +1,12 @@
 [package]
-name = "kite"
+name = "wowsir"
 version = "0.1.0"
 edition = "2021"
 description = "A fast, headless, agent-first browser CLI for testing websites"
 license = "MIT"
 
 [[bin]]
-name = "kite"
+name = "wowsir"
 path = "src/main.rs"
 
 [dependencies]

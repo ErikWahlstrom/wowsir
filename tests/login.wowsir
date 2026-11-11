@@ -1,5 +1,5 @@
-# kite test — recorded default
-# run with: kite run tests/login.kite
+# wowsir test — recorded default
+# run with: wowsir run tests/login.wowsir
 open localhost:8765
 fill textbox:Email user@example.com
 fill textbox:Password hunter2

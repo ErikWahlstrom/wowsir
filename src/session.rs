@@ -17,7 +17,7 @@ pub const LIB: &str = include_str!("inject.js");
 /// `setTimeout(render, 120)`-style UI updates. Timers created inside a timer
 /// callback are ignored, so polling loops never block settling.
 const TIMER_SHIM: &str = r#"(() => {
-  if (window.__kite_t) return;
+  if (window.__wowsir_t) return;
   // A pending timer only counts if the action (or a fetch/XHR it caused)
   // plausibly created it: born within 600ms of the action mark, or within
   // 500ms after a request completed. Timers driven by live streams
@@ -40,8 +40,8 @@ const TIMER_SHIM: &str = r#"(() => {
   const send = XMLHttpRequest.prototype.send;
   XMLHttpRequest.prototype.send = function () { this.addEventListener('loadend', finished); return send.apply(this, arguments); };
   const caused = (born) => (born >= mark && born - mark < 600) || done.some((c) => c >= mark && born >= c && born - c < 500);
-  Object.defineProperty(window, '__kite_mark', { value: () => { mark = now(); }, enumerable: false });
-  Object.defineProperty(window, '__kite_t', { value: () => { const t = now(); let n = 0; for (const [id, p] of pending) { if (p.due < t - 2000) pending.delete(id); else if (caused(p.born)) n++; } return n; }, enumerable: false });
+  Object.defineProperty(window, '__wowsir_mark', { value: () => { mark = now(); }, enumerable: false });
+  Object.defineProperty(window, '__wowsir_t', { value: () => { const t = now(); let n = 0; for (const [id, p] of pending) { if (p.due < t - 2000) pending.delete(id); else if (caused(p.born)) n++; } return n; }, enumerable: false });
 })();"#;
 
 pub struct Req {
@@ -332,7 +332,7 @@ impl Session {
             tabs: vec![],
             tab_events: Arc::new(Mutex::new(vec![])),
             timeout: Duration::from_millis(
-                std::env::var("KITE_TIMEOUT").ok().and_then(|v| v.parse().ok()).unwrap_or(5000),
+                std::env::var("WOWSIR_TIMEOUT").ok().and_then(|v| v.parse().ok()).unwrap_or(5000),
             ),
         })
     }
@@ -359,14 +359,14 @@ impl Session {
         let r = self
             .call(
                 "Page.createIsolatedWorld",
-                json!({ "frameId": self.target, "worldName": "kite", "grantUniveralAccess": true }),
+                json!({ "frameId": self.target, "worldName": "wowsir", "grantUniveralAccess": true }),
             )
             .await?;
         let id = r["executionContextId"].as_i64().ok_or_else(|| anyhow!("no isolated world"))?;
         let r = self
             .call(
                 "Runtime.evaluate",
-                json!({ "expression": format!("{LIB}\n__kite.init({});", self.next_ref), "contextId": id }),
+                json!({ "expression": format!("{LIB}\n__wowsir.init({});", self.next_ref), "contextId": id }),
             )
             .await?;
         if let Some(ex) = r.get("exceptionDetails") {
@@ -376,7 +376,7 @@ impl Session {
         Ok(id)
     }
 
-    /// Evaluate an expression in kite's isolated world. Retries across navigations.
+    /// Evaluate an expression in wowsir's isolated world. Retries across navigations.
     pub async fn js(&mut self, expr: &str) -> Result<Value> {
         for _ in 0..4 {
             let ctx = self.world().await?;
@@ -399,7 +399,7 @@ impl Session {
                 Ok(v) => {
                     if let Some(ex) = v.get("exceptionDetails") {
                         let t = exception_text(ex);
-                        if t.contains("__kite is not defined") {
+                        if t.contains("__wowsir is not defined") {
                             self.st.lock().unwrap().world = None;
                             continue;
                         }
@@ -409,7 +409,7 @@ impl Session {
                 }
             }
         }
-        bail!("page kept navigating while kite tried to read it")
+        bail!("page kept navigating while wowsir tried to read it")
     }
 
     /// Like `js` but returns a remote object id (for DOM.setFileInputFiles etc).
@@ -424,10 +424,10 @@ impl Session {
         v["result"]["objectId"].as_str().map(String::from).ok_or_else(|| anyhow!("no object"))
     }
 
-    /// Call `__kite.<f>(args...)`.
+    /// Call `__wowsir.<f>(args...)`.
     pub async fn k(&mut self, f: &str, args: &[Value]) -> Result<Value> {
         let a: Vec<String> = args.iter().map(|v| v.to_string()).collect();
-        self.js(&format!("__kite.{f}({})", a.join(","))).await
+        self.js(&format!("__wowsir.{f}({})", a.join(","))).await
     }
 
     pub async fn snapshot(&mut self, opts: Value) -> Result<Snap> {
@@ -458,13 +458,13 @@ impl Session {
             };
             if ready && start.elapsed() >= Duration::from_millis(25) {
                 let timers = self
-                    .call("Runtime.evaluate", json!({ "expression": "window.__kite_t ? window.__kite_t() : 0", "returnByValue": true }))
+                    .call("Runtime.evaluate", json!({ "expression": "window.__wowsir_t ? window.__wowsir_t() : 0", "returnByValue": true }))
                     .await
                     .ok()
                     .and_then(|v| v["result"]["value"].as_i64())
                     .unwrap_or(0);
                 if timers == 0 {
-                    if let Ok(v) = self.js("__kite.quiet()").await {
+                    if let Ok(v) = self.js("__wowsir.quiet()").await {
                         if v.as_i64().unwrap_or(0) >= 40 {
                             return None;
                         }
@@ -507,7 +507,7 @@ impl Session {
 
     /// Close the active page and fall back to the most recent other one.
     pub async fn close_active(&mut self) -> Result<()> {
-        let Some(next) = self.tabs.pop() else { bail!("only one tab open: use `kite close` to end the session") };
+        let Some(next) = self.tabs.pop() else { bail!("only one tab open: use `wowsir close` to end the session") };
         let old = self.swap_in(next);
         self.cdp.unsubscribe(&old.sid);
         self.tab_order.retain(|t| *t != old.target);
@@ -591,7 +591,7 @@ impl Session {
                         let n = self.tab_order.len() - 1;
                         let back = self.tab_order.iter().position(|t| self.tabs.last().map_or(false, |l| &l.target == t)).unwrap_or(0);
                         self.st.lock().unwrap().events.push(format!(
-                            "new tab {n} opened and is now active (`kite tab {back}` goes back, `kite tab close` closes it)"
+                            "new tab {n} opened and is now active (`wowsir tab {back}` goes back, `wowsir tab close` closes it)"
                         ));
                     }
                 }

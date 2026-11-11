@@ -14,7 +14,7 @@ use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const HELP: &str = r#"kite — fast headless browser for agents. Every action returns what changed.
+const HELP: &str = r#"wowsir — fast headless browser for agents. Every action returns what changed.
 
 NAVIGATE   open <url> · back · forward · reload · url · title
 LAYOUT     watch T... · watch (list) · watch off [T]   watched elements report `! moved:` / `! jumped:` after each action
@@ -36,14 +36,14 @@ ASSERT     expect text|no-text TEXT · expect url|title PART · expect visible|h
 DEBUG      console [--errors] [--all] · net [--failed] [--api] [--grep X] · net --body PATTERN [--full] · errors [--clear] · eval JS · eval --file F.js · eval - (stdin) · cookies [clear]
 SETUP      viewport W H [--mobile] | viewport mobile|tablet|desktop (mobile: touch + mobile user agent) · block images|fonts|media|css|lite|off
            dialog accept [TEXT]|dismiss (TEXT is typed into prompt())
-AUTH       login URL               opens a visible window; a human signs in; cookies saved to ~/.kite/auth/
+AUTH       login URL               opens a visible window; a human signs in; cookies saved to ~/.wowsir/auth/
            login --from http://127.0.0.1:9222 DOMAIN   copy one site's cookies from a running debug Chrome
            Saved logins load into every new session automatically (--no-auth for a clean one).
            logout SITE             delete a saved login and wipe that site's cookies/storage from running sessions
            state save FILE · state load FILE   (Playwright-compatible storageState)
 TESTS      run FILE...|- [--parallel N]   (one command per line, # comments; stops at first failure)
            record [show|save FILE|clear]   (your session as a replayable test, refs → stable selectors)
-SESSIONS   -s NAME / KITE_SESSION=NAME (isolated cookies/storage; parallel-safe) · sessions · close · stop · status
+SESSIONS   -s NAME / WOWSIR_SESSION=NAME (isolated cookies/storage; parallel-safe) · sessions · close · stop · status
 
 TARGETS (T)  @e12               ref from a snapshot (stable while the element lives)
              button:Sign in     role:name — link:, textbox:, checkbox:, combobox:, h1:, ...
@@ -51,12 +51,12 @@ TARGETS (T)  @e12               ref from a snapshot (stable while the element li
              #id / .class / [data-testid=x]   any CSS selector (pierces open shadow DOM)
                                 quote '#id' in the shell: unquoted, # starts a shell comment
              A >> B             B near A: inside it, else the first after it in its section
-                                ("h6:Low level >> checkbox:PIR kitchen", "text=Unsaved >> button:Discard")
+                                ("h2:Shipping >> checkbox:Gift wrap", "text=Unsaved >> button:Discard")
 
-MCP        kite mcp   (stdio MCP server: tools `browser` + `browser_run`, same commands and output as this CLI)
-           add to Claude Code: claude mcp add --scope user kite -- kite mcp
+MCP        wowsir mcp   (stdio MCP server: tools `browser` + `browser_run`, same commands and output as this CLI)
+           add to Claude Code: claude mcp add --scope user wowsir -- wowsir mcp
 GLOBAL     -q quiet (no diff) · --snap full snapshot after actions · --timeout MS · --headed · --no-auth
-After each action kite waits for the page to settle (network + DOM quiet), then prints:
+After each action wowsir waits for the page to settle (network + DOM quiet), then prints:
   ok <action> · <ms>   then  → new url,  ! console/network errors/dialogs,  ~ diff of the page (+ added, - removed)
 "#;
 
@@ -78,10 +78,10 @@ fn main() {
 
     // global flags (anywhere before a literal `--`)
     let mut req = Req {
-        session: std::env::var("KITE_SESSION").unwrap_or_else(|_| "default".into()),
+        session: std::env::var("WOWSIR_SESSION").unwrap_or_else(|_| "default".into()),
         cwd: std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
-        headed: std::env::var("KITE_HEADED").is_ok(),
-        no_auth: std::env::var("KITE_NO_AUTH").is_ok(),
+        headed: std::env::var("WOWSIR_HEADED").is_ok(),
+        no_auth: std::env::var("WOWSIR_NO_AUTH").is_ok(),
         ..Default::default()
     };
     let mut rest = vec![];
@@ -123,7 +123,7 @@ fn main() {
             return;
         }
         "version" | "-V" | "--version" => {
-            println!("kite {}", env!("CARGO_PKG_VERSION"));
+            println!("wowsir {}", env!("CARGO_PKG_VERSION"));
             return;
         }
         "login" => {
@@ -131,7 +131,7 @@ fn main() {
             let result = if let Some(from) = a.flags.get("from") {
                 // copy cookies out of a running debug browser (e.g. your dev Chrome on :9222)
                 let Some(m) = a.pos.first() else {
-                    eprintln!("usage: kite login --from http://127.0.0.1:9222 <domain-part, e.g. example.com>");
+                    eprintln!("usage: wowsir login --from http://127.0.0.1:9222 <domain-part, e.g. example.com>");
                     std::process::exit(2);
                 };
                 let from = if from.is_empty() { "http://127.0.0.1:9222".to_string() } else { from.clone() };
@@ -139,7 +139,7 @@ fn main() {
                 login::import_from(&from, m, &out).map(|(n, d)| format!("copied {n} cookies for {} from {from} → {}", d.join(", "), out.display()))
             } else {
                 let Some(url) = a.pos.first() else {
-                    eprintln!("usage: kite login <url> [--out FILE]   |   kite login --from http://127.0.0.1:9222 <domain-part>");
+                    eprintln!("usage: wowsir login <url> [--out FILE]   |   wowsir login --from http://127.0.0.1:9222 <domain-part>");
                     std::process::exit(2);
                 };
                 let url = if url.contains("://") { url.clone() } else { format!("https://{url}") };
@@ -166,7 +166,7 @@ fn main() {
         }
         "logout" => {
             let Some(what) = argv.get(1) else {
-                eprintln!("usage: kite logout <site>   (a saved login name like `example` or any URL/host of that site)\nsaved logins: {}",
+                eprintln!("usage: wowsir logout <site>   (a saved login name like `example` or any URL/host of that site)\nsaved logins: {}",
                     login::saved_logins().iter().map(|l| l.0.clone()).collect::<Vec<_>>().join(", "));
                 std::process::exit(2);
             };
@@ -245,7 +245,7 @@ fn main() {
         Ok(r) => r,
         Err(e) => {
             if stopping {
-                println!("kite daemon not running");
+                println!("wowsir daemon not running");
                 return;
             }
             eprintln!("FAIL {e}");
@@ -271,7 +271,7 @@ fn main() {
     std::process::exit(if resp.code == 99 { 0 } else { resp.code });
 }
 
-/// Read a .kite file (or stdin for "-") into numbered steps.
+/// Read a .wowsir file (or stdin for "-") into numbered steps.
 fn parse_steps(src: &str) -> Result<Vec<(usize, Vec<String>)>, String> {
     let text = if src == "-" {
         let mut s = String::new();
@@ -286,7 +286,7 @@ fn parse_steps(src: &str) -> Result<Vec<(usize, Vec<String>)>, String> {
         if l.is_empty() || l.starts_with('#') {
             continue;
         }
-        let l = l.strip_prefix("kite ").unwrap_or(l);
+        let l = l.strip_prefix("wowsir ").unwrap_or(l);
         if let Some(w) = commands::eval_line(l) {
             steps.push((n + 1, w));
             continue;

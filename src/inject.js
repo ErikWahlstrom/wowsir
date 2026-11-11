@@ -1,9 +1,9 @@
-// kite page library. Runs in an isolated world (invisible to page scripts),
+// wowsir page library. Runs in an isolated world (invisible to page scripts),
 // sharing the DOM with the page. Everything the agent sees is produced here
 // in a single pass, so one CDP round-trip = one snapshot.
 (() => {
-if (globalThis.__kite) return;
-const K = (globalThis.__kite = {});
+if (globalThis.__wowsir) return;
+const K = (globalThis.__wowsir = {});
 
 // ---------------------------------------------------------------- refs
 let nextRef = 1;
@@ -651,7 +651,7 @@ function resolve(t, opt) {
     const w = byRef.get(p.n);
     el = w && w.deref();
     if (!el || !el.isConnected) {
-      const e = new Error(`@e${p.n} is gone from the page (stale ref). Run \`kite snap\` for fresh refs.`);
+      const e = new Error(`@e${p.n} is gone from the page (stale ref). Run \`wowsir snap\` for fresh refs.`);
       throw e;
     }
     return el;
@@ -767,9 +767,9 @@ K.prepFill = (t, sel) => {
   if (el.disabled) return { retry: describe(el) + ' is disabled' };
   if (el.readOnly) throw new Error(describe(el) + ' is readonly');
   const s = sel ? selectorFor(el) : undefined;
-  if (tag === 'select') throw new Error(describe(el) + ' is a <select>; use `kite select ' + t + ' <option>`');
+  if (tag === 'select') throw new Error(describe(el) + ' is a <select>; use `wowsir select ' + t + ' <option>`');
   if (tag === 'input' && !TEXTLIKE.has(el.type)) {
-    if (['checkbox', 'radio'].includes(el.type)) throw new Error(describe(el) + ' is a ' + el.type + '; use `kite check`');
+    if (['checkbox', 'radio'].includes(el.type)) throw new Error(describe(el) + ' is a ' + el.type + '; use `wowsir check`');
     return { direct: true, desc: describe(el), sel: s }; // date, time, color, range...
   }
   if (tag !== 'input' && tag !== 'textarea' && !el.isContentEditable) {
@@ -958,7 +958,7 @@ K.watchRead = (list) => {
 // outlines for `screenshot --mark`; returns a cleanup id
 K.mark = (targets) => {
   const layer = document.createElement('div');
-  layer.setAttribute('data-kite-mark', '');
+  layer.setAttribute('data-wowsir-mark', '');
   layer.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647';
   document.documentElement.appendChild(layer);
   const placed = [];
@@ -986,7 +986,7 @@ K.mark = (targets) => {
   }
   return true;
 };
-K.unmark = () => { for (const l of document.querySelectorAll('[data-kite-mark]')) l.remove(); return true; };
+K.unmark = () => { for (const l of document.querySelectorAll('[data-wowsir-mark]')) l.remove(); return true; };
 
 K.rect = (t) => {
   const el = resolve(t, { raw: true });

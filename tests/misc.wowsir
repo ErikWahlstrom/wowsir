@@ -2,8 +2,8 @@
 open localhost:8765/misc.html
 hover "#h"
 expect visible "text=Tooltip text"
-fill textbox:Search kite
-expect text "Results for kite"
+fill textbox:Search wowsir
+expect text "Results for wowsir"
 click "button:Shadow button"
 expect text "shadow clicked"
 upload button:Avatar ../Cargo.toml

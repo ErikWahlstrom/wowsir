@@ -45,7 +45,7 @@ fn newest(dir: &PathBuf, prefix: &str) -> Option<PathBuf> {
 
 /// Returns (binary, is_headless_shell).
 pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
-    if let Some(p) = std::env::var_os("KITE_CHROME") {
+    if let Some(p) = std::env::var_os("WOWSIR_CHROME") {
         let p = PathBuf::from(p);
         let shell = p.to_string_lossy().contains("headless_shell");
         return Ok((p, shell));
@@ -97,7 +97,7 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
             return Ok((c, false));
         }
     }
-    bail!("no Chromium found. Install one (`npx playwright install chromium-headless-shell`) or set KITE_CHROME=/path/to/chrome")
+    bail!("no Chromium found. Install one (`npx playwright install chromium-headless-shell`) or set WOWSIR_CHROME=/path/to/chrome")
 }
 
 fn mkpipe() -> Result<(RawFd, RawFd)> {
@@ -113,7 +113,7 @@ fn mkpipe() -> Result<(RawFd, RawFd)> {
 
 pub fn launch(headed: bool) -> Result<Browser> {
     let (bin, _shell) = find_chrome(headed)?;
-    let profile = std::env::temp_dir().join(format!("kite-profile-{}", std::process::id()));
+    let profile = std::env::temp_dir().join(format!("wowsir-profile-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
     std::fs::create_dir_all(&profile)?;
 

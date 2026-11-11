@@ -1,4 +1,4 @@
-//! `kite login URL`: open a visible browser, let a human log in, save the
+//! `wowsir login URL`: open a visible browser, let a human log in, save the
 //! resulting cookies as a Playwright-compatible storageState file.
 
 use crate::browser;
@@ -34,11 +34,11 @@ pub fn host_of(url: &str) -> String {
 
 /// Where saved logins live. Every new session loads all of them.
 pub fn auth_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("KITE_AUTH_DIR") {
+    if let Some(d) = std::env::var_os("WOWSIR_AUTH_DIR") {
         return PathBuf::from(d);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| ".".into());
-    home.join(".kite/auth")
+    home.join(".wowsir/auth")
 }
 
 pub fn default_state_path(url: &str) -> PathBuf {
@@ -129,7 +129,7 @@ pub async fn run(url: &str, out: &Path, timeout: Duration) -> Result<usize> {
         let state = json!({
             "cookies": cookies,
             "origins": origins,
-            "kite": { "loginUrl": url, "savedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+            "wowsir": { "loginUrl": url, "savedAt": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
         });
         write_private(out, &serde_json::to_string_pretty(&state)?)
     };
@@ -248,7 +248,7 @@ pub fn saved_logins() -> Vec<(String, Option<f64>, Option<String>)> {
             a.iter().filter_map(|c| c["expires"].as_f64()).filter(|e| *e > 0.0).fold(None, |m: Option<f64>, e| Some(m.map_or(e, |m| m.min(e))))
         });
         let name = p.file_stem().unwrap_or_default().to_string_lossy().to_string();
-        out.push((name, exp, v["kite"]["loginUrl"].as_str().map(String::from)));
+        out.push((name, exp, v["wowsir"]["loginUrl"].as_str().map(String::from)));
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
     out

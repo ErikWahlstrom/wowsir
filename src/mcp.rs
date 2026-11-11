@@ -1,15 +1,15 @@
-//! `kite mcp`: a Model Context Protocol server over stdio.
+//! `wowsir mcp`: a Model Context Protocol server over stdio.
 //!
 //! Deliberately tiny surface (two tools) so it costs little context. Each
-//! call runs the very same `kite` command line the CLI would, so the CLI and
+//! call runs the very same `wowsir` command line the CLI would, so the CLI and
 //! MCP can never drift apart: every CLI command is available over MCP.
 
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::process::{Command, Stdio};
 
-const BROWSER_DESC: &str = r#"Headless browser for testing web pages (kite). Pass one kite command; the browser and session persist between calls.
-After each action kite waits for the page to settle and returns: `ok <action> · <ms>`, `→ <new url>`, `! <console/network errors, dialogs>`, and `~` a diff of the page (+ added, - removed). Act on refs from the output; you rarely need a fresh snapshot.
+const BROWSER_DESC: &str = r#"Headless browser for testing web pages (wowsir). Pass one wowsir command; the browser and session persist between calls.
+After each action wowsir waits for the page to settle and returns: `ok <action> · <ms>`, `→ <new url>`, `! <console/network errors, dialogs>`, and `~` a diff of the page (+ added, - removed). Act on refs from the output; you rarely need a fresh snapshot.
 Commands:
   open <url> | back | reload | tabs | tab N | tab close | snap [-i] [--grep TEXT] [--in TARGET] [--viewport]
   click T [--mod|--shift] | fill T TEXT | type [T] TEXT | press KEY (Enter, Control+a) | select T OPTION | check T | uncheck T | hover T | scroll [down|up|T] | scroll T down|PX (inside it) | upload T FILE
@@ -18,11 +18,11 @@ Commands:
   text [T] | console [--errors] | net [--failed] | net --body PATTERN | errors | eval JS | screenshot [PATH] | viewport W H | viewport mobile
   watch T... (then actions report "! moved:/jumped:") | expect still | screenshot --mark
   mock PATTERN 500|abort [--json X] [--delay MS] | mock off
-  run FILE... [--parallel N] | record save FILE | logout SITE | login URL (opens a window for the human to sign in; only when kite says sign-in is needed)
+  run FILE... [--parallel N] | record save FILE | logout SITE | login URL (opens a window for the human to sign in; only when wowsir says sign-in is needed)
 Targets: @e12 (ref) · button:Sign in (role:name) · text=Forgot password · CSS selector · A >> B (B near A, e.g. "h3:Billing >> button:Edit").
 Flags: -q (no diff) · --no-auth (logged-out session) · --timeout MS."#;
 
-const RUN_DESC: &str = "Run several kite commands in one call, one per line (# comments allowed). Stops at the first failure and reports the failing line. Use for multi-step flows or to replay a recorded test.";
+const RUN_DESC: &str = "Run several wowsir commands in one call, one per line (# comments allowed). Stops at the first failure and reports the failing line. Use for multi-step flows or to replay a recorded test.";
 
 fn tools() -> Value {
     json!([
@@ -32,8 +32,8 @@ fn tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "command": { "type": "string", "description": "A kite command, e.g. `open example.com`, `click @e5`, `fill textbox:Email a@b.c`, `expect text \"Saved\"`." },
-                    "session": { "type": "string", "description": "Optional session name: isolated cookies/storage, for parallel or clean tests. Default: shared with the kite CLI." }
+                    "command": { "type": "string", "description": "A wowsir command, e.g. `open example.com`, `click @e5`, `fill textbox:Email a@b.c`, `expect text \"Saved\"`." },
+                    "session": { "type": "string", "description": "Optional session name: isolated cookies/storage, for parallel or clean tests. Default: shared with the wowsir CLI." }
                 },
                 "required": ["command"]
             }
@@ -44,7 +44,7 @@ fn tools() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "steps": { "type": "string", "description": "kite commands, one per line." },
+                    "steps": { "type": "string", "description": "wowsir commands, one per line." },
                     "session": { "type": "string" }
                 },
                 "required": ["steps"]
@@ -53,9 +53,9 @@ fn tools() -> Value {
     ])
 }
 
-/// Run `kite [-s session] <args>` (optionally with stdin) and return (output, ok).
-fn run_kite(args: Vec<String>, session: Option<&str>, stdin: Option<&str>) -> (String, bool) {
-    let exe = std::env::current_exe().unwrap_or_else(|_| "kite".into());
+/// Run `wowsir [-s session] <args>` (optionally with stdin) and return (output, ok).
+fn run_wowsir(args: Vec<String>, session: Option<&str>, stdin: Option<&str>) -> (String, bool) {
+    let exe = std::env::current_exe().unwrap_or_else(|_| "wowsir".into());
     let mut cmd = Command::new(exe);
     if let Some(s) = session.filter(|s| !s.is_empty()) {
         cmd.args(["-s", s]);
@@ -63,7 +63,7 @@ fn run_kite(args: Vec<String>, session: Option<&str>, stdin: Option<&str>) -> (S
     cmd.args(&args).stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return (format!("FAIL could not run kite: {e}"), false),
+        Err(e) => return (format!("FAIL could not run wowsir: {e}"), false),
     };
     if let (Some(input), Some(mut si)) = (stdin, child.stdin.take()) {
         let _ = si.write_all(input.as_bytes());
@@ -89,20 +89,20 @@ fn call_tool(name: &str, args: &Value) -> (String, bool) {
     match name {
         "browser" => {
             let command = args["command"].as_str().unwrap_or("").trim();
-            let command = command.strip_prefix("kite ").unwrap_or(command);
+            let command = command.strip_prefix("wowsir ").unwrap_or(command);
             if command.is_empty() {
                 return ("FAIL empty command. Example: open example.com".into(), false);
             }
             if let Some(w) = crate::commands::eval_line(command) {
-                return run_kite(vec![w[0].clone(), "-".into()], session, Some(&w[1]));
+                return run_wowsir(vec![w[0].clone(), "-".into()], session, Some(&w[1]));
             }
             match crate::commands::split_line(command) {
                 Ok(argv) if argv.first().map(|s| s.as_str()) == Some("mcp") => ("FAIL not available over MCP".into(), false),
-                Ok(argv) => run_kite(argv, session, None),
+                Ok(argv) => run_wowsir(argv, session, None),
                 Err(e) => (format!("FAIL could not parse command ({e}). Quote text with spaces: fill @e3 \"hello world\""), false),
             }
         }
-        "browser_run" => run_kite(vec!["run".into(), "-".into()], session, Some(args["steps"].as_str().unwrap_or(""))),
+        "browser_run" => run_wowsir(vec!["run".into(), "-".into()], session, Some(args["steps"].as_str().unwrap_or(""))),
         _ => (format!("unknown tool {name}"), false),
     }
 }
@@ -122,8 +122,8 @@ pub fn serve() {
             "initialize" => json!({
                 "protocolVersion": msg["params"]["protocolVersion"].as_str().unwrap_or("2025-06-18"),
                 "capabilities": { "tools": {} },
-                "serverInfo": { "name": "kite", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "kite is a fast headless browser for testing web pages. Use the `browser` tool with kite commands; every action reports what changed plus any console/network errors."
+                "serverInfo": { "name": "wowsir", "version": env!("CARGO_PKG_VERSION") },
+                "instructions": "wowsir is a fast headless browser for testing web pages. Use the `browser` tool with wowsir commands; every action reports what changed plus any console/network errors."
             }),
             "ping" => json!({}),
             "tools/list" => json!({ "tools": tools() }),

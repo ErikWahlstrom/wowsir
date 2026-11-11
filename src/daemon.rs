@@ -15,22 +15,22 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::Mutex;
 
 pub fn dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("KITE_HOME") {
+    if let Some(d) = std::env::var_os("WOWSIR_HOME") {
         return PathBuf::from(d);
     }
     let uid = unsafe { libc::getuid() };
     // fixed path (not $TMPDIR) so every caller finds the same daemon
-    PathBuf::from(format!("/tmp/kite-{uid}"))
+    PathBuf::from(format!("/tmp/wowsir-{uid}"))
 }
 
 pub fn sock_path() -> PathBuf {
-    let p = dir().join("kite.sock");
+    let p = dir().join("wowsir.sock");
     // unix socket paths max out around 104 bytes: fall back to a short, stable path
     if p.as_os_str().len() > 100 {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         p.hash(&mut h);
-        return PathBuf::from(format!("/tmp/kite-{}-{:x}.sock", unsafe { libc::getuid() }, h.finish()));
+        return PathBuf::from(format!("/tmp/wowsir-{}-{:x}.sock", unsafe { libc::getuid() }, h.finish()));
     }
     p
 }
@@ -101,7 +101,7 @@ pub async fn run(headed: bool) -> Result<()> {
     {
         let d2 = daemon.clone();
         let idle = Duration::from_secs(
-            std::env::var("KITE_IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30 * 60),
+            std::env::var("WOWSIR_IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30 * 60),
         );
         tokio::spawn(async move {
             loop {
@@ -226,7 +226,7 @@ impl Daemon {
     async fn process(&self, req: Req) -> Resp {
         let cmd = req.cmd.first().map(|s| s.as_str()).unwrap_or("");
         match cmd {
-            "stop" | "quit" => return Resp { out: "kite daemon stopped".into(), code: 99 },
+            "stop" | "quit" => return Resp { out: "wowsir daemon stopped".into(), code: 99 },
             "sessions" => {
                 let s = self.sessions.lock().await;
                 let mut out = vec![];
@@ -284,7 +284,7 @@ impl Daemon {
             _ => {}
         }
         if req.headed && !self.headed {
-            return Resp { out: "daemon is running headless; run `kite stop` then retry with --headed".into(), code: 2 };
+            return Resp { out: "daemon is running headless; run `wowsir stop` then retry with --headed".into(), code: 2 };
         }
         let sess = match self.session(&req.session, req.no_auth).await {
             Ok(s) => s,

@@ -8,16 +8,16 @@
 <h1>Stepper</h1>
 <div id="bar">
   <div id="stepper">
-    <button id="prev">Previous</button><span id="label">Frame 1</span><button id="next">Next</button>
+    <button id="prev">Previous</button><span id="label">Page 1</span><button id="next">Next</button>
   </div>
   <div id="footer"></div>
 </div>
 <script>
   let n = 1;
   const label = document.getElementById('label'), footer = document.getElementById('footer');
-  document.getElementById('next').onclick = () => { n++; label.textContent = 'Frame ' + n; };
-  document.getElementById('prev').onclick = () => { n = Math.max(1, n - 1); label.textContent = 'Frame ' + n; };
-  // "Checking…" briefly adds a footer line, which pushes the stepper up and back
-  window.check = () => { footer.textContent = 'Checking forecast…'; setTimeout(() => { footer.textContent = ''; }, 300); };
+  document.getElementById('next').onclick = () => { n++; label.textContent = 'Page ' + n; };
+  document.getElementById('prev').onclick = () => { n = Math.max(1, n - 1); label.textContent = 'Page ' + n; };
+  // "Saving…" briefly adds a footer line, which pushes the stepper up and back
+  window.check = () => { footer.textContent = 'Saving…'; setTimeout(() => { footer.textContent = ''; }, 300); };
   window.note = () => { footer.textContent = 'Shared time unavailable'; };
 </script>

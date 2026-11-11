@@ -45,7 +45,7 @@ pub struct Args {
 const VALUE_FLAGS: &[&str] =
     &["from", "grep", "g", "in", "max", "timeout", "t", "el", "out", "o", "button", "json", "body", "file", "delay", "type"];
 
-/// Split a kite command line like a shell, except for `#`: `# note` (hash then
+/// Split a wowsir command line like a shell, except for `#`: `# note` (hash then
 /// space) starts a comment, while `#id` is a CSS selector, not a comment.
 pub fn split_line(line: &str) -> Result<Vec<String>, shell_words::ParseError> {
     let mut out = String::with_capacity(line.len() + 4);
@@ -71,7 +71,7 @@ pub fn split_line(line: &str) -> Result<Vec<String>, shell_words::ParseError> {
     shell_words::split(&out)
 }
 
-/// `eval <js>` written as one line of text (a .kite file, `run -`, MCP): keep the
+/// `eval <js>` written as one line of text (a .wowsir file, `run -`, MCP): keep the
 /// JavaScript exactly as written instead of shell-splitting away its quotes.
 /// A script that is one fully quoted token (old style) is unquoted once.
 pub fn eval_line(line: &str) -> Option<Vec<String>> {
@@ -261,7 +261,7 @@ impl Session {
         let mut rec: Option<Vec<String>> = None;
         if MUTATING.contains(&cmd.as_str()) {
             // timers created from here on are attributed to this action
-            let _ = self.call("Runtime.evaluate", json!({ "expression": "window.__kite_mark && __kite_mark()" })).await;
+            let _ = self.call("Runtime.evaluate", json!({ "expression": "window.__wowsir_mark && __wowsir_mark()" })).await;
         }
         // a recorded test must not depend on @eN refs (they're per page load):
         // swap them for stable selectors now, while the elements still exist
@@ -317,7 +317,7 @@ impl Session {
                         t.push_str("\ninteractive elements now:\n");
                         t.push_str(&s.lines.join("\n"));
                         if s.more > 0 {
-                            t.push_str(&format!("\n… {} more (kite snap -i)", s.more));
+                            t.push_str(&format!("\n… {} more (wowsir snap -i)", s.more));
                         }
                     }
                 }
@@ -358,7 +358,7 @@ impl Session {
             // the page that bounced us is the one to sign in to (it redirects to the provider and back)
             let page = if head.starts_with("open ") { self.last_open.clone() } else { before_url.to_string() };
             t.push_str(&format!(
-                "\n! redirected to a login page: not signed in or the session expired. Ask the user to sign in: you may start `kite login {page}` in the background (a window opens on their screen and closes itself once they are signed in), then retry"
+                "\n! redirected to a login page: not signed in or the session expired. Ask the user to sign in: you may start `wowsir login {page}` in the background (a window opens on their screen and closes itself once they are signed in), then retry"
             ));
         }
         // saved-login expiry: only for the site the agent is on
@@ -382,7 +382,7 @@ impl Session {
             self.warned_401 = true;
             let page = if head.starts_with("open ") { self.last_open.clone() } else { url.clone() };
             t.push_str(&format!(
-                "\n! the site's API answered 401: probably not signed in or the session expired. Ask the user to sign in: you may start `kite login {page}` in the background (a window opens on their screen; they use the site's own sign-in button), then retry"
+                "\n! the site's API answered 401: probably not signed in or the session expired. Ask the user to sign in: you may start `wowsir login {page}` in the background (a window opens on their screen; they use the site's own sign-in button), then retry"
             ));
         }
         if head.starts_with("press") || head.starts_with("type") {
@@ -420,7 +420,7 @@ impl Session {
                         t.push_str(&s.lines.join("\n"));
                     }
                     if s.more > 0 {
-                        t.push_str(&format!("\n… {} more lines (kite snap --grep/--in/-i to focus)", s.more));
+                        t.push_str(&format!("\n… {} more lines (wowsir snap --grep/--in/-i to focus)", s.more));
                     }
                 };
                 // a new document gets a full snapshot; same-document URL changes (SPA) get a diff
@@ -515,7 +515,7 @@ impl Session {
                 t.push_str(&format!("\n~ {n} changed:\n{}", collapse_removed(&d).join("\n")));
             }
         } else if new_doc {
-            t.push_str("\n~ new page loaded (kite snap to see it)");
+            t.push_str("\n~ new page loaded (wowsir snap to see it)");
         }
         self.baseline = Some(base);
         (!t.is_empty()).then_some(t)
@@ -533,7 +533,7 @@ impl Session {
             let origin = o["origin"].as_str().unwrap_or("");
             n_ls += 1;
             let src = format!(
-                "if (location.origin === {} && !sessionStorage.getItem('__kite_ls')) {{ for (const i of {}) localStorage.setItem(i.name, i.value); for (const i of {}) sessionStorage.setItem(i.name, i.value); sessionStorage.setItem('__kite_ls','1'); }}",
+                "if (location.origin === {} && !sessionStorage.getItem('__wowsir_ls')) {{ for (const i of {}) localStorage.setItem(i.name, i.value); for (const i of {}) sessionStorage.setItem(i.name, i.value); sessionStorage.setItem('__wowsir_ls','1'); }}",
                 json!(origin),
                 if o["localStorage"].is_array() { o["localStorage"].clone() } else { json!([]) },
                 if o["sessionStorage"].is_array() { o["sessionStorage"].clone() } else { json!([]) }
@@ -603,12 +603,12 @@ impl Session {
         }
     }
 
-    /// Load every saved login in the auth dir (~/.kite/auth/*.json).
+    /// Load every saved login in the auth dir (~/.wowsir/auth/*.json).
     pub async fn load_auth_dir(&mut self) -> Vec<String> {
         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
         for (name, exp, login_url) in crate::login::saved_logins() {
             let Some(exp) = exp else { continue };
-            let how = login_url.map(|u| format!("`kite login {u}`")).unwrap_or_else(|| "`kite login <url>`".into());
+            let how = login_url.map(|u| format!("`wowsir login {u}`")).unwrap_or_else(|| "`wowsir login <url>`".into());
             self.expiry_notes.retain(|(n, _)| *n != name);
             if exp < now {
                 self.expiry_notes.push((name.clone(), format!("saved login '{name}' has expired: ask the user to sign in again ({how})")));
@@ -637,7 +637,7 @@ impl Session {
             .unwrap_or(self.timeout)
     }
 
-    /// Poll a `__kite.<f>` action until it stops returning {retry}.
+    /// Poll a `__wowsir.<f>` action until it stops returning {retry}.
     async fn actionable(&mut self, f: &str, args: &[Value], timeout: Duration) -> Result<Value> {
         let start = Instant::now();
         loop {
@@ -721,7 +721,7 @@ impl Session {
                 if r.get("loaderId").is_none() {
                     // same document, only the #hash changed: the page was not reloaded
                     self.st.lock().unwrap().loading = false;
-                    return Ok(format!("open {url} (same page, only the #hash changed: no reload; `kite reload` for a fresh load)"));
+                    return Ok(format!("open {url} (same page, only the #hash changed: no reload; `wowsir reload` for a fresh load)"));
                 }
                 let status = self.st.lock().unwrap().doc_status;
                 Ok(if status > 0 && status != 200 { format!("open {url} ({status})") } else { format!("open {url}") })
@@ -765,7 +765,7 @@ impl Session {
                     "close" => {
                         if let Some(n) = a.pos.get(1) {
                             let i: usize = n.parse().map_err(|_| anyhow!("tab close takes a tab number"))?;
-                            let id = self.tab_order.get(i).cloned().ok_or_else(|| anyhow!("no tab {i} (kite tabs lists them)"))?;
+                            let id = self.tab_order.get(i).cloned().ok_or_else(|| anyhow!("no tab {i} (wowsir tabs lists them)"))?;
                             if id != self.target {
                                 let t = self.tabs.iter().position(|t| t.target == id).map(|p| self.tabs.remove(p));
                                 if let Some(t) = t {
@@ -782,7 +782,7 @@ impl Session {
                     }
                     n => {
                         let i: usize = n.parse().map_err(|_| anyhow!("usage: tab N | tab new [URL] | tab close [N]"))?;
-                        let id = self.tab_order.get(i).cloned().ok_or_else(|| anyhow!("no tab {i} (kite tabs lists them)"))?;
+                        let id = self.tab_order.get(i).cloned().ok_or_else(|| anyhow!("no tab {i} (wowsir tabs lists them)"))?;
                         if id != self.target {
                             self.activate(&id);
                         }
@@ -893,7 +893,7 @@ impl Session {
             }
             "press" | "key" => {
                 if a.pos.is_empty() {
-                    bail!("missing key, e.g. `kite press Enter` or `kite press Control+a`");
+                    bail!("missing key, e.g. `wowsir press Enter` or `wowsir press Control+a`");
                 }
                 for spec in &a.pos {
                     for e in keys::chord(spec).map_err(|e| anyhow!(e))? {
@@ -949,7 +949,7 @@ impl Session {
             }
             "focus" => {
                 let target = a.p(0, "target")?;
-                self.js(&format!("__kite.resolve({}).focus()", json!(target))).await?;
+                self.js(&format!("__wowsir.resolve({}).focus()", json!(target))).await?;
                 Ok(format!("focus {target}"))
             }
             "scroll" => {
@@ -998,7 +998,7 @@ impl Session {
                     t => {
                         let d = self
                             .js(&format!(
-                                "(()=>{{const e=__kite.resolve({});e.scrollIntoView({{block:'center',behavior:'instant'}});return __kite.describe(e)}})()",
+                                "(()=>{{const e=__wowsir.resolve({});e.scrollIntoView({{block:'center',behavior:'instant'}});return __wowsir.describe(e)}})()",
                                 json!(t)
                             ))
                             .await?;
@@ -1024,7 +1024,7 @@ impl Session {
                         bail!("file not found: {f}");
                     }
                 }
-                let obj = self.js_object(&format!("__kite.isFileInput({})", json!(target))).await?;
+                let obj = self.js_object(&format!("__wowsir.isFileInput({})", json!(target))).await?;
                 self.call("DOM.setFileInputFiles", json!({ "files": files, "objectId": obj })).await?;
                 Ok(format!("upload {} file(s) to {target}", files.len()))
             }
@@ -1044,7 +1044,7 @@ impl Session {
             "eval" | "js" => {
                 let code = a.pos.join(" ");
                 if code.is_empty() {
-                    bail!("missing JavaScript. Pass it quoted (kite eval 'document.title'), from a file (kite eval --file check.js) or stdin (kite eval -)");
+                    bail!("missing JavaScript. Pass it quoted (wowsir eval 'document.title'), from a file (wowsir eval --file check.js) or stdin (wowsir eval -)");
                 }
                 // main world: page globals are visible here
                 let r = self
@@ -1080,7 +1080,7 @@ impl Session {
                 let first = a.pos.first().map(|s| s.as_str());
                 if first.is_none() {
                     if self.watches.is_empty() {
-                        return Ok("not watching anything (kite watch T... to start)".into());
+                        return Ok("not watching anything (wowsir watch T... to start)".into());
                     }
                     self.check_watches().await;
                     let lines: Vec<String> = self
@@ -1133,7 +1133,7 @@ impl Session {
                         targets = self.watches.iter().map(|w| w.sel.clone()).collect();
                     }
                     if targets.is_empty() {
-                        bail!("--mark outlines watched elements (kite watch T... first), or name one with --mark=T");
+                        bail!("--mark outlines watched elements (wowsir watch T... first), or name one with --mark=T");
                     }
                     self.k("mark", &[json!(targets)]).await?;
                 }
@@ -1142,7 +1142,7 @@ impl Session {
                     if p.is_absolute() { p.to_path_buf() } else { ctx.cwd.join(p) }
                 });
                 let path = path.unwrap_or_else(|| {
-                    std::env::temp_dir().join(format!("kite-{}-{}.png", self.name, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()))
+                    std::env::temp_dir().join(format!("wowsir-{}-{}.png", self.name, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()))
                 });
                 let jpeg = path.extension().map(|e| e == "jpg" || e == "jpeg").unwrap_or(false);
                 let mut p = json!({ "format": if jpeg { "jpeg" } else { "png" }, "optimizeForSpeed": true });
@@ -1188,7 +1188,7 @@ impl Session {
                     let s = self.st.lock().unwrap();
                     s.done.iter().rev().find(|(_, l)| { let l = l.to_lowercase(); parts.iter().any(|p| l.contains(p)) }).cloned()
                 };
-                let (id, line) = hit.ok_or_else(|| anyhow!("no completed response matches '{pat}' (kite net lists requests; streams show up once they finish)"))?;
+                let (id, line) = hit.ok_or_else(|| anyhow!("no completed response matches '{pat}' (wowsir net lists requests; streams show up once they finish)"))?;
                 let r = self.call("Network.getResponseBody", json!({ "requestId": id })).await.map_err(|e| anyhow!("{line}: body not available ({e})"))?;
                 let raw = r["body"].as_str().unwrap_or("");
                 let body = if r["base64Encoded"].as_bool() == Some(true) {
@@ -1359,7 +1359,7 @@ impl Session {
                 mocks.retain(|x| x.pattern != pattern);
                 mocks.push(m);
                 self.set_mocks(mocks).await?;
-                Ok(format!("mock {pattern} → {what}{delay} (applies from the next request; `kite reload` to re-fetch)"))
+                Ok(format!("mock {pattern} → {what}{delay} (applies from the next request; `wowsir reload` to re-fetch)"))
             }
             "dialog" | "dialogs" => {
                 let accept = match a.pos.first().map(|s| s.as_str()) {
@@ -1447,7 +1447,7 @@ impl Session {
                             steps.insert(0, shell_words::join(["open", start.as_str()]));
                         }
                         let body = format!(
-                            "# kite test — recorded {}\n# run with: kite run {}\n{}\n",
+                            "# wowsir test — recorded {}\n# run with: wowsir run {}\n{}\n",
                             self.name,
                             f,
                             steps.join("\n")
@@ -1458,7 +1458,7 @@ impl Session {
                     o => bail!("record show|save <file>|clear (got {o})"),
                 }
             }
-            _ => bail!("unknown command '{cmd}'. Run `kite help`."),
+            _ => bail!("unknown command '{cmd}'. Run `wowsir help`."),
         }
     }
 
@@ -1511,7 +1511,7 @@ impl Session {
         if kind == "still" {
             // layout stability of watched elements since `watch` / the last `expect still`
             if self.watches.is_empty() {
-                bail!("nothing watched: run `kite watch T...` before the steps, then `expect still`");
+                bail!("nothing watched: run `wowsir watch T...` before the steps, then `expect still`");
             }
             self.check_watches().await;
             let only: Vec<&String> = a.pos[1..].iter().collect();

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
-// kite vs chrome-devtools-mcp: run the same scenario the way an agent would
+// wowsir vs chrome-devtools-mcp: run the same scenario the way an agent would
 // with each tool, and measure what the agent pays (calls, tokens, time) and
 // what it learns (pass/fail, errors surfaced).
 //
 //   ./bench/fetch-sites.sh   (once: W3C examples, served locally on 127.0.0.1:8982)
-//   node bench/bench.mjs bench/scenarios/*.mjs [--runs 3] [--mcp] [--only kite|devtools] [--show]
-import { Mcp, launchChrome, cdp, devtoolsMcpCommand, kite, est, sh, now, KITE, APG, APG_PORT } from './lib.mjs';
+//   node bench/bench.mjs bench/scenarios/*.mjs [--runs 3] [--mcp] [--only wowsir|devtools] [--show]
+import { Mcp, launchChrome, cdp, devtoolsMcpCommand, wowsir, est, sh, now, WOWSIR, APG, APG_PORT } from './lib.mjs';
 import { createServer } from 'node:http';
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -18,9 +18,9 @@ const flag = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv[
 const has = (n) => argv.includes('--' + n);
 const files = argv.filter((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && !['--show'].includes(argv[i - 1])));
 const RUNS = +flag('runs', 1);
-// Saved logins: kite loads ~/.kite/auth/*.json into every session by itself;
+// Saved logins: wowsir loads ~/.wowsir/auth/*.json into every session by itself;
 // the devtools driver gets the same cookies seeded into its Chrome.
-const AUTH_DIR = process.env.KITE_AUTH_DIR || join(homedir(), '.kite/auth');
+const AUTH_DIR = process.env.WOWSIR_AUTH_DIR || join(homedir(), '.wowsir/auth');
 const authCookies = () => existsSync(AUTH_DIR)
   ? readdirSync(AUTH_DIR).filter((f) => f.endsWith('.json')).flatMap((f) => JSON.parse(readFileSync(join(AUTH_DIR, f), 'utf8')).cookies || [])
   : [];
@@ -34,7 +34,7 @@ function checkHosts(scenario) {
 }
 const ONLY = flag('only');
 const SHOW = has('show');
-const TOOLS = has('mcp') ? ['kite', 'kite-mcp', 'devtools'] : ['kite', 'devtools'];
+const TOOLS = has('mcp') ? ['wowsir', 'wowsir-mcp', 'devtools'] : ['wowsir', 'devtools'];
 
 // ------------------------------------------------------------------ helpers shared by drivers
 const norm = (s) => (s || '').toLowerCase().replace(/[\u200b-\u200d\u2060\ufeff\ue000-\uf8ff]/g, '').replace(/\s+/g, ' ').trim();
@@ -44,7 +44,7 @@ function find(items, role, name) {
   const roleOk = (x) => !r || norm(x.role) === r || (r === 'textbox' && /searchbox|textbox|combobox/.test(norm(x.role)));
   return items.find((x) => roleOk(x) && norm(x.name) === n) || items.find((x) => roleOk(x) && norm(x.name).includes(n));
 }
-const kiteItems = (text) => [...text.matchAll(/^[ +\-~]*([\w-]+) "((?:[^"\\]|\\.)*)" @e(\d+)/gm)].map((m) => ({ role: m[1], name: m[2], id: '@e' + m[3] }));
+const wowsirItems = (text) => [...text.matchAll(/^[ +\-~]*([\w-]+) "((?:[^"\\]|\\.)*)" @e(\d+)/gm)].map((m) => ({ role: m[1], name: m[2], id: '@e' + m[3] }));
 // icon buttons often have an empty name and their label in description="..." (an agent would read it)
 const dtItems = (text) => [...text.matchAll(/uid=(\S+) ([\w-]+)(?: "((?:[^"\\]|\\.)*)")?([^\n]*)/g)].map((m) => {
   const desc = /description="((?:[^"\\]|\\.)*)"/.exec(m[4] || '');
@@ -52,7 +52,7 @@ const dtItems = (text) => [...text.matchAll(/uid=(\S+) ([\w-]+)(?: "((?:[^"\\]|\
   return { role: m[2], name: name || (desc ? desc[1] : ''), id: m[1] };
 });
 // Errors an agent would notice in a response.
-const kiteIssues = (t) => t.split('\n').filter((l) => l.startsWith('! ')).map((l) => l.slice(2));
+const wowsirIssues = (t) => t.split('\n').filter((l) => l.startsWith('! ')).map((l) => l.slice(2));
 const dtIssues = (t) => t.split('\n').filter((l) => /^msgid=|\[error\]|\[(4\d\d|5\d\d)\]|\[failed|net::ERR/i.test(l.trim()));
 
 class Recorder {
@@ -69,29 +69,29 @@ class Recorder {
   }
 }
 
-// ------------------------------------------------------------------ kite driver
-// transport 'cli' spawns `kite` per call; 'mcp' calls the `browser` tool of `kite mcp` (same output by design)
-async function kiteDriver(scenario, transport = 'cli') {
+// ------------------------------------------------------------------ wowsir driver
+// transport 'cli' spawns `wowsir` per call; 'mcp' calls the `browser` tool of `wowsir mcp` (same output by design)
+async function wowsirDriver(scenario, transport = 'cli') {
   const S = 'bench-' + Math.random().toString(36).slice(2, 8);
   // warm session (not counted); it loads saved logins unless the scenario must run logged out
-  await kite(S, [...(scenario.auth === false ? ['--no-auth'] : []), 'open', 'about:blank'], { quiet: true });
+  await wowsir(S, [...(scenario.auth === false ? ['--no-auth'] : []), 'open', 'about:blank'], { quiet: true });
   let mcp = null;
-  if (transport === 'mcp') { mcp = new Mcp(KITE, ['mcp']); await mcp.init(); }
+  if (transport === 'mcp') { mcp = new Mcp(WOWSIR, ['mcp']); await mcp.init(); }
   const exec = transport === 'mcp'
     ? async (args) => { const r = await mcp.call('browser', { command: args.map(sh).join(' '), session: S }); return { text: r.text, code: r.isError ? 1 : 0 }; }
-    : (args) => kite(S, args);
-  const rec = new Recorder(transport === 'mcp' ? 'kite-mcp' : 'kite');
+    : (args) => wowsir(S, args);
+  const rec = new Recorder(transport === 'mcp' ? 'wowsir-mcp' : 'wowsir');
   let last = '';
   const k = async (label, args) => {
     const r = await rec.run(label, () => exec(args));
     last = r.text.includes('@e') ? r.text : last;
     const u = /^→ (\S+)/m.exec(r.text) || /^# .* · (\S+)$/m.exec(r.text);
     if (u) rec.viewUrl = u[1];
-    for (const i of kiteIssues(r.text)) rec.issues.add(i);
+    for (const i of wowsirIssues(r.text)) rec.issues.add(i);
     return r;
   };
   const target = async (role, name) => {
-    const hit = find(kiteItems(last), role, name);
+    const hit = find(wowsirItems(last), role, name);
     return hit ? hit.id : `${role || 'text'}${role ? ':' : '='}${name}`;
   };
   const failures = [];
@@ -113,7 +113,7 @@ async function kiteDriver(scenario, transport = 'cli') {
     if (r.code !== 0 && st.do !== 'errors') failures.push(`${st.do} ${st.name || st.text || st.url || st.contains || ''}: ${r.text.split('\n')[0]}`);
     if (r.code !== 0 && st.must !== false && st.do !== 'errors') break;
   }
-  await kite(S, ['close']);
+  await wowsir(S, ['close']);
   if (mcp) mcp.close();
   return { rec, failures };
 }
@@ -233,20 +233,20 @@ for (const f of files) {
   const scenario = (await import(path)).default;
   checkHosts(scenario);
   if (scenario.steps.some((st) => st.url && st.url.startsWith(APG))) serveApg();
-  if (scenario.auth && !authCookies().length) { console.log(`skip ${scenario.name}: needs a saved login (kite login <url> or kite login --from http://127.0.0.1:9222 <domain>)`); continue; }
+  if (scenario.auth && !authCookies().length) { console.log(`skip ${scenario.name}: needs a saved login (wowsir login <url> or wowsir login --from http://127.0.0.1:9222 <domain>)`); continue; }
   noise = scenario.noise || null;
   const res = { scenario: scenario.name, file: basename(f) };
   for (const tool of TOOLS) {
     if (ONLY && ONLY !== tool) continue;
     const runs = [];
-    for (let i = 0; i < RUNS; i++) runs.push(tool === 'devtools' ? await devtoolsDriver(scenario, dt) : await kiteDriver(scenario, tool === 'kite-mcp' ? 'mcp' : 'cli'));
+    for (let i = 0; i < RUNS; i++) runs.push(tool === 'devtools' ? await devtoolsDriver(scenario, dt) : await wowsirDriver(scenario, tool === 'wowsir-mcp' ? 'mcp' : 'cli'));
     res[tool] = summarize(runs);
   }
   allResults.push(res);
 }
 
 const pct = (a, b) => (b ? `${Math.round((a / b) * 100)}%` : '–');
-let md = `# kite vs chrome-devtools-mcp ${dt.version}\n\n${new Date().toISOString().slice(0, 16)} · runs per tool: ${RUNS} (medians)\n\n` +
+let md = `# wowsir vs chrome-devtools-mcp ${dt.version}\n\n${new Date().toISOString().slice(0, 16)} · runs per tool: ${RUNS} (medians)\n\n` +
   `*stale views*: URL checks where the preceding action's response still showed a different page than the one reached (the agent was looking at the wrong page).\n\n`;
 md += '| scenario | tool | pass | calls | tokens (est) | time | stale views | errors surfaced |\n|---|---|---|---|---|---|---|---|\n';
 for (const r of allResults) {
@@ -254,7 +254,7 @@ for (const r of allResults) {
     const s = r[tool]; if (!s) continue;
     md += `| ${r.scenario} | ${tool} | ${s.passed}/${s.runs} | ${s.calls} | ${s.tokens} | ${s.ms}ms | ${s.checked ? `${s.stale}/${s.checked}` : '–'} | ${s.issues.length} |\n`;
   }
-  if (r.kite && r.devtools) md += `| | **kite/devtools** | | ${pct(r.kite.calls, r.devtools.calls)} | ${pct(r.kite.tokens, r.devtools.tokens)} | ${pct(r.kite.ms, r.devtools.ms)} | | |\n`;
+  if (r.wowsir && r.devtools) md += `| | **wowsir/devtools** | | ${pct(r.wowsir.calls, r.devtools.calls)} | ${pct(r.wowsir.tokens, r.devtools.tokens)} | ${pct(r.wowsir.ms, r.devtools.ms)} | | |\n`;
 }
 for (const r of allResults) for (const tool of TOOLS) {
   const s = r[tool]; if (!s) continue;

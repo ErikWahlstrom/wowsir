@@ -1,10 +1,10 @@
-// Shared plumbing for the kite vs chrome-devtools-mcp benchmark.
+// Shared plumbing for the wowsir vs chrome-devtools-mcp benchmark.
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
-export const KITE = process.env.KITE_BIN || 'kite';
+export const WOWSIR = process.env.WOWSIR_BIN || 'wowsir';
 export const now = () => performance.now();
 
 // ------------------------------------------------------------------ chrome
@@ -90,7 +90,7 @@ export class Mcp {
   }
   notify(method, params) { this.proc.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, params }) + '\n'); }
   async init() {
-    await this.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'kite-bench', version: '0' } });
+    await this.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'wowsir-bench', version: '0' } });
     this.notify('notifications/initialized', {});
     this.tools = (await this.request('tools/list', {})).tools;
   }
@@ -117,10 +117,10 @@ export function devtoolsMcpCommand() {
   return { cmd: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'], version: 'latest' };
 }
 
-// ------------------------------------------------------------------ kite
-export function kite(session, args, { quiet = false } = {}) {
+// ------------------------------------------------------------------ wowsir
+export function wowsir(session, args, { quiet = false } = {}) {
   return new Promise((res) => {
-    const p = spawn(KITE, ['-s', session, ...(quiet ? ['-q'] : []), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(WOWSIR, ['-s', session, ...(quiet ? ['-q'] : []), ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     p.stdout.on('data', (d) => (out += d));
     p.stderr.on('data', (d) => (out += d));
