@@ -56,11 +56,19 @@ Agents that test websites spend most of their tokens and round-trips on two thin
 
 ## Install
 
+Runs on macOS, Linux and Windows.
+
 ```sh
-cargo install --path .
-# needs a Chromium: uses Playwright's chrome-headless-shell if present, else Chrome/Chromium/Edge.
-# npx playwright install chromium-headless-shell     # optional, fastest
-# WOWSIR_CHROME=/path/to/chrome                       # override
+cargo install --git https://github.com/ErikWahlstrom/wowsir
+```
+
+Or download a binary for your platform from [Releases](https://github.com/ErikWahlstrom/wowsir/releases) and put it on your `PATH`.
+
+wowsir needs a Chromium-based browser. It uses Playwright's `chrome-headless-shell` if present (fastest), else Chrome, Chromium or Edge (on Windows, Edge is always there):
+
+```sh
+npx playwright install chromium-headless-shell   # optional, fastest
+WOWSIR_CHROME=/path/to/chrome                    # override
 ```
 
 ## Usage
@@ -167,8 +175,8 @@ Seven scenarios on public sites (W3C ARIA examples, the-internet.herokuapp.com, 
 ## Architecture
 
 ```
-wowsir (CLI, sync, ~1ms) ──unix socket──▶ wowsir daemon (tokio)
-                                          ├─ Chromium via --remote-debugging-pipe (fd 3/4, NUL-delimited JSON)
+wowsir (CLI, sync, ~1ms) ──unix socket / named pipe──▶ wowsir daemon (tokio)
+                                          ├─ Chromium via --remote-debugging-pipe (fd 3/4 or inherited handles, NUL-delimited JSON)
                                           ├─ session = browser context + page + event tracker
                                           │    network inflight / console / exceptions / dialogs / popups
                                           └─ src/inject.js in an isolated world:
@@ -177,6 +185,7 @@ wowsir (CLI, sync, ~1ms) ──unix socket──▶ wowsir daemon (tokio)
 ```
 
 - `src/cdp.rs`: about 150 lines of CDP client, with no generated bindings.
+- `src/platform.rs`: everything that differs between Unix and Windows.
 - `src/session.rs`: event tracking, the settle algorithm, and the isolated world.
 - `src/commands.rs`: every command, plus the diff renderer.
 - `src/inject.js`: everything that touches the DOM.
@@ -195,7 +204,6 @@ wowsir (CLI, sync, ~1ms) ──unix socket──▶ wowsir daemon (tokio)
 ## Limits / TODO
 
 - Inside a cross-origin iframe, `watch`, `screenshot --el` and `html` see only the outer page; frames nested inside a cross-origin frame are not walked.
-- Unix only (macOS/Linux): it uses fd passing and unix sockets.
 
 ## Dev
 

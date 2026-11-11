@@ -9,7 +9,7 @@ PORT=8765
 export WOWSIR_HOME="$(mktemp -d "${TMPDIR:-/tmp}/wowsir-smoke.XXXXXX")"
 export WOWSIR_AUTH_DIR="$WOWSIR_HOME/auth"
 PY=$(command -v python3 || command -v python)   # Windows runners only have `python`
-"$PY" -m http.server $PORT --directory tests/fixtures >/dev/null 2>&1 & SRV=$!
+"$PY" tests/serve.py $PORT tests/fixtures & SRV=$!
 trap 'kill $SRV 2>/dev/null; "$K" stop >/dev/null 2>&1; rm -rf "$WOWSIR_HOME"' EXIT
 # Python starts slowly on Windows runners: wait (both names the tests use), and fail loudly
 ready=""
