@@ -153,6 +153,12 @@ pub fn launch(headed: bool) -> Result<Browser> {
             "--enable-features=NetworkServiceInProcess2",
             "--window-size=1280,800",
         ]);
+    // Chrome's sandbox can't start as root (containers) or under some CI kernels: opt out there
+    let no_sandbox = std::env::var("WOWSIR_NO_SANDBOX").map(|v| v != "0" && !v.is_empty()).unwrap_or(false)
+        || (cfg!(target_os = "linux") && unsafe { libc::geteuid() } == 0);
+    if no_sandbox {
+        cmd.arg("--no-sandbox");
+    }
     if !headed {
         if !bin.to_string_lossy().contains("headless_shell")
             && !bin.to_string_lossy().contains("chrome-headless-shell")

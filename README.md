@@ -146,6 +146,19 @@ With several files, each runs in its own fresh session (own cookies, tabs and mo
 wowsir run tests/*.wowsir --parallel 4
 ```
 
+### In CI
+
+GitHub's Ubuntu and macOS runners come with Google Chrome, which wowsir finds by itself:
+
+```yaml
+- run: cargo install --git https://github.com/ErikWahlstrom/wowsir
+- run: wowsir run e2e/*.wowsir --parallel 4     # exit code 1 on the first failing step
+  env:
+    WOWSIR_NO_SANDBOX: "1"   # Chrome's sandbox often can't start in CI containers (automatic when running as root)
+```
+
+Start your app first and point the tests at it (`open localhost:3000/...`). This repo's own workflow is in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
 ## Benchmark
 
 Seven scenarios on public sites (W3C ARIA examples, the-internet.herokuapp.com, TodoMVC), each driven the way an agent would with wowsir and with chrome-devtools-mcp. wowsir used 47 calls and about 10k tokens; chrome-devtools-mcp used 55 calls and about 125k tokens, and could not pick an option from the W3C combobox because its snapshot left the options out. Details and how to reproduce: [bench/RESULTS.md](bench/RESULTS.md).
