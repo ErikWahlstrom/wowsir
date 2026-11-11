@@ -4,3 +4,4 @@ target/
 .claude/
 bench/results/
 bench/sites/
+!assets/*.png
