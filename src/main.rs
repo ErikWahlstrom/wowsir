@@ -69,7 +69,11 @@ fn main() {
     }
     if argv.first().map(|s| s.as_str()) == Some("__daemon") {
         let headed = argv.iter().any(|a| a == "--headed");
-        let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(4)
+            .enable_all()
+            .build()
+            .unwrap();
         if let Err(e) = rt.block_on(daemon::run(headed)) {
             eprintln!("daemon error: {e:#}");
             std::process::exit(1);
@@ -80,7 +84,9 @@ fn main() {
     // global flags (anywhere before a literal `--`)
     let mut req = Req {
         session: std::env::var("WOWSIR_SESSION").unwrap_or_else(|_| "default".into()),
-        cwd: std::env::current_dir().map(|p| p.display().to_string()).unwrap_or_default(),
+        cwd: std::env::current_dir()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default(),
         headed: std::env::var("WOWSIR_HEADED").is_ok(),
         no_auth: std::env::var("WOWSIR_NO_AUTH").is_ok(),
         ..Default::default()
@@ -135,24 +141,56 @@ fn main() {
                     eprintln!("usage: wowsir login --from http://127.0.0.1:9222 <domain-part, e.g. example.com>");
                     std::process::exit(2);
                 };
-                let from = if from.is_empty() { "http://127.0.0.1:9222".to_string() } else { from.clone() };
-                let out = a.flags.get("out").map(std::path::PathBuf::from).unwrap_or_else(|| login::auth_dir().join(format!("{m}.json")));
-                login::import_from(&from, m, &out).map(|(n, d)| format!("copied {n} cookies for {} from {from} → {}", d.join(", "), out.display()))
+                let from = if from.is_empty() {
+                    "http://127.0.0.1:9222".to_string()
+                } else {
+                    from.clone()
+                };
+                let out = a
+                    .flags
+                    .get("out")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| login::auth_dir().join(format!("{m}.json")));
+                login::import_from(&from, m, &out).map(|(n, d)| {
+                    format!(
+                        "copied {n} cookies for {} from {from} → {}",
+                        d.join(", "),
+                        out.display()
+                    )
+                })
             } else {
                 let Some(url) = a.pos.first() else {
                     eprintln!("usage: wowsir login <url> [--out FILE]   |   wowsir login --from http://127.0.0.1:9222 <domain-part>");
                     std::process::exit(2);
                 };
-                let url = if url.contains("://") { url.clone() } else { format!("https://{url}") };
-                let out = a.flags.get("out").map(std::path::PathBuf::from).unwrap_or_else(|| login::default_state_path(&url));
-                let rt = tokio::runtime::Builder::new_multi_thread().worker_threads(4).enable_all().build().unwrap();
-                rt.block_on(login::run(&url, &out, Duration::from_secs(1800))).map(|n| format!("saved {n} cookies → {}", out.display()))
+                let url = if url.contains("://") {
+                    url.clone()
+                } else {
+                    format!("https://{url}")
+                };
+                let out = a
+                    .flags
+                    .get("out")
+                    .map(std::path::PathBuf::from)
+                    .unwrap_or_else(|| login::default_state_path(&url));
+                let rt = tokio::runtime::Builder::new_multi_thread()
+                    .worker_threads(4)
+                    .enable_all()
+                    .build()
+                    .unwrap();
+                rt.block_on(login::run(&url, &out, Duration::from_secs(1800)))
+                    .map(|n| format!("saved {n} cookies → {}", out.display()))
             };
             match result {
                 Ok(msg) => {
                     println!("{msg}");
                     // push the new login into sessions that are already running
-                    let reload = Req { cmd: vec!["auth-reload".into()], session: req.session.clone(), cwd: req.cwd.clone(), ..Default::default() };
+                    let reload = Req {
+                        cmd: vec!["auth-reload".into()],
+                        session: req.session.clone(),
+                        cwd: req.cwd.clone(),
+                        ..Default::default()
+                    };
                     if let Ok(r) = send(&reload, false) {
                         println!("{}", r.out);
                     }
@@ -178,7 +216,12 @@ fn main() {
                     cmd.extend(domains);
                     cmd.push("--".into());
                     cmd.extend(origins);
-                    let r = Req { cmd, session: req.session.clone(), cwd: req.cwd.clone(), ..Default::default() };
+                    let r = Req {
+                        cmd,
+                        session: req.session.clone(),
+                        cwd: req.cwd.clone(),
+                        ..Default::default()
+                    };
                     if let Ok(r) = send(&r, false) {
                         println!("{}", r.out);
                     }
@@ -215,10 +258,14 @@ fn main() {
             while let Some(a) = it.next() {
                 match a.as_str() {
                     "--parallel" | "-j" => {
-                        jobs = it.next().and_then(|n| n.parse().ok()).filter(|n| *n > 0).unwrap_or_else(|| {
-                            eprintln!("FAIL --parallel takes a number, e.g. --parallel 4");
-                            std::process::exit(2);
-                        })
+                        jobs = it
+                            .next()
+                            .and_then(|n| n.parse().ok())
+                            .filter(|n| *n > 0)
+                            .unwrap_or_else(|| {
+                                eprintln!("FAIL --parallel takes a number, e.g. --parallel 4");
+                                std::process::exit(2);
+                            })
                     }
                     f => files.push(f.to_string()),
                 }
@@ -261,7 +308,9 @@ fn main() {
         let lock = daemon::dir().join("daemon.lock");
         let start = Instant::now();
         while start.elapsed() < Duration::from_secs(5) {
-            let Ok(f) = std::fs::OpenOptions::new().write(true).open(&lock) else { break };
+            let Ok(f) = std::fs::OpenOptions::new().write(true).open(&lock) else {
+                break;
+            };
             use std::os::fd::AsRawFd;
             if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
                 break;
@@ -316,13 +365,17 @@ fn run_files(base: &Req, files: &[String], jobs: usize) -> i32 {
         return 2;
     }
     let next = std::sync::atomic::AtomicUsize::new(0);
-    let results: Vec<std::sync::Mutex<Option<(bool, String)>>> = files.iter().map(|_| std::sync::Mutex::new(None)).collect();
+    let results: Vec<std::sync::Mutex<Option<(bool, String)>>> =
+        files.iter().map(|_| std::sync::Mutex::new(None)).collect();
     std::thread::scope(|sc| {
         for _ in 0..jobs.min(files.len()) {
             sc.spawn(|| loop {
                 let i = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let Some(file) = files.get(i) else { break };
-                let stem = std::path::Path::new(file).file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+                let stem = std::path::Path::new(file)
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
                 let session = format!("{}-run{i}-{stem}", base.session);
                 let r = match parse_steps(file) {
                     Err(e) => (false, format!("FAIL {e}")),
@@ -348,7 +401,11 @@ fn run_files(base: &Req, files: &[String], jobs: usize) -> i32 {
     });
     let mut passed = 0;
     for (file, r) in files.iter().zip(&results) {
-        let (ok, out) = r.lock().unwrap().take().unwrap_or((false, "FAIL not run".into()));
+        let (ok, out) = r
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or((false, "FAIL not run".into()));
         println!("== {file}\n{out}");
         if ok {
             passed += 1;
@@ -378,9 +435,14 @@ fn send(req: &Req, autostart: bool) -> Result<Resp, String> {
     body.push(b'\n');
     stream.write_all(&body).map_err(|e| e.to_string())?;
     let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).map_err(|e| format!("daemon connection lost: {e}"))?;
+    BufReader::new(stream)
+        .read_line(&mut line)
+        .map_err(|e| format!("daemon connection lost: {e}"))?;
     if line.is_empty() {
-        return Err("daemon closed the connection (crashed?). See daemon.log in ".to_string() + &daemon::dir().display().to_string());
+        return Err(
+            "daemon closed the connection (crashed?). See daemon.log in ".to_string()
+                + &daemon::dir().display().to_string(),
+        );
     }
     serde_json::from_str(&line).map_err(|e| e.to_string())
 }
@@ -408,14 +470,18 @@ fn start_daemon(headed: bool) -> Result<UnixStream, String> {
             Ok(())
         });
     }
-    cmd.spawn().map_err(|e| format!("could not start daemon: {e}"))?;
+    cmd.spawn()
+        .map_err(|e| format!("could not start daemon: {e}"))?;
     let start = Instant::now();
     loop {
         if let Ok(s) = UnixStream::connect(daemon::sock_path()) {
             return Ok(s);
         }
         if start.elapsed() > Duration::from_secs(15) {
-            return Err(format!("daemon did not start; see {}", dir.join("daemon.log").display()));
+            return Err(format!(
+                "daemon did not start; see {}",
+                dir.join("daemon.log").display()
+            ));
         }
         std::thread::sleep(Duration::from_millis(5));
     }

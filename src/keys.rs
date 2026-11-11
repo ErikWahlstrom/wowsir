@@ -27,7 +27,12 @@ fn modifier_key(bit: i64) -> Key {
         4 => ("Meta", "MetaLeft", 91),
         _ => ("Shift", "ShiftLeft", 16),
     };
-    Key { key: k.into(), code: c.into(), vk, text: None }
+    Key {
+        key: k.into(),
+        code: c.into(),
+        vk,
+        text: None,
+    }
 }
 
 pub fn lookup(name: &str) -> Option<Key> {
@@ -57,7 +62,12 @@ pub fn lookup(name: &str) -> Option<Key> {
         _ => {
             if let Some(n) = lower.strip_prefix('f').and_then(|n| n.parse::<i64>().ok()) {
                 if (1..=12).contains(&n) {
-                    return Some(Key { key: format!("F{n}"), code: format!("F{n}"), vk: 111 + n, text: None });
+                    return Some(Key {
+                        key: format!("F{n}"),
+                        code: format!("F{n}"),
+                        vk: 111 + n,
+                        text: None,
+                    });
                 }
             }
             let mut chars = name.chars();
@@ -73,22 +83,39 @@ pub fn lookup(name: &str) -> Option<Key> {
 
 pub fn char_key(c: char) -> Key {
     let (code, vk) = if c.is_ascii_alphabetic() {
-        (format!("Key{}", c.to_ascii_uppercase()), c.to_ascii_uppercase() as i64)
+        (
+            format!("Key{}", c.to_ascii_uppercase()),
+            c.to_ascii_uppercase() as i64,
+        )
     } else if c.is_ascii_digit() {
         (format!("Digit{c}"), c as i64)
     } else if c == ' ' {
         ("Space".into(), 32)
     } else if c == '\n' {
-        return Key { key: "Enter".into(), code: "Enter".into(), vk: 13, text: Some("\r".into()) };
+        return Key {
+            key: "Enter".into(),
+            code: "Enter".into(),
+            vk: 13,
+            text: Some("\r".into()),
+        };
     } else {
         (String::new(), 0)
     };
-    Key { key: c.to_string(), code, vk, text: Some(c.to_string()) }
+    Key {
+        key: c.to_string(),
+        code,
+        vk,
+        text: Some(c.to_string()),
+    }
 }
 
 /// "Control+Shift+a" → list of (down, up) event param pairs, in press order.
 pub fn chord(spec: &str) -> Result<Vec<Value>, String> {
-    let parts: Vec<&str> = if spec == "+" { vec!["+"] } else { spec.split('+').collect() };
+    let parts: Vec<&str> = if spec == "+" {
+        vec!["+"]
+    } else {
+        spec.split('+').collect()
+    };
     let mut mods = 0i64;
     let mut mod_keys = vec![];
     let mut main: Option<Key> = None;
@@ -114,11 +141,19 @@ pub fn chord(spec: &str) -> Result<Vec<Value>, String> {
     }
     if let Some(k) = main {
         // With Ctrl/Meta held, no text is produced (it's a shortcut).
-        let text = if mods & (2 | 4) != 0 { None } else { k.text.clone() };
+        let text = if mods & (2 | 4) != 0 {
+            None
+        } else {
+            k.text.clone()
+        };
         let mut down = json!({"type": if text.is_some() {"keyDown"} else {"rawKeyDown"},
             "key":k.key,"code":k.code,"windowsVirtualKeyCode":k.vk,"modifiers":mods});
         if let Some(t) = &text {
-            let t = if mods & 8 != 0 && t.len() == 1 { t.to_uppercase() } else { t.clone() };
+            let t = if mods & 8 != 0 && t.len() == 1 {
+                t.to_uppercase()
+            } else {
+                t.clone()
+            };
             down["text"] = json!(t);
             down["unmodifiedText"] = json!(t);
         }

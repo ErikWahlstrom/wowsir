@@ -63,7 +63,9 @@ impl Cdp {
                 while let Some(pos) = buf[start..].iter().position(|&b| b == 0) {
                     let frame = &buf[start..start + pos];
                     start += pos + 1;
-                    let Ok(v) = serde_json::from_slice::<Value>(frame) else { continue };
+                    let Ok(v) = serde_json::from_slice::<Value>(frame) else {
+                        continue;
+                    };
                     dispatch(v, &p2, &r2);
                 }
                 buf.drain(..start);
@@ -75,7 +77,12 @@ impl Cdp {
             r2.lock().unwrap().clear();
         });
 
-        Arc::new(Cdp { next_id: AtomicU64::new(1), pending, out, routes })
+        Arc::new(Cdp {
+            next_id: AtomicU64::new(1),
+            pending,
+            out,
+            routes,
+        })
     }
 
     /// Route events for `session` ("" for browser-level) to a new receiver.
@@ -90,7 +97,8 @@ impl Cdp {
     }
 
     pub async fn call(&self, session: Option<&str>, method: &str, params: Value) -> Result<Value> {
-        self.call_timeout(session, method, params, Duration::from_secs(30)).await
+        self.call_timeout(session, method, params, Duration::from_secs(30))
+            .await
     }
 
     pub async fn call_timeout(
@@ -116,7 +124,10 @@ impl Cdp {
             Ok(Err(_)) => Err(anyhow!("{method}: browser connection closed")),
             Err(_) => {
                 self.pending.lock().unwrap().remove(&id);
-                Err(anyhow!("{method}: timed out after {}ms", timeout.as_millis()))
+                Err(anyhow!(
+                    "{method}: timed out after {}ms",
+                    timeout.as_millis()
+                ))
             }
         }
     }
@@ -141,7 +152,9 @@ fn dispatch(
         }
         return;
     }
-    let Some(method) = v.get("method").and_then(|m| m.as_str()) else { return };
+    let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
+        return;
+    };
     let session = v.get("sessionId").and_then(|s| s.as_str()).unwrap_or("");
     let routes = routes.lock().unwrap();
     if let Some(tx) = routes.get(session) {

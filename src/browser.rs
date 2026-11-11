@@ -24,7 +24,9 @@ impl Drop for Browser {
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| "/".into())
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| "/".into())
 }
 
 /// Newest directory matching `prefix-<N>` inside `dir`.
@@ -34,7 +36,7 @@ fn newest(dir: &PathBuf, prefix: &str) -> Option<PathBuf> {
         let name = e.file_name().to_string_lossy().to_string();
         if let Some(rest) = name.strip_prefix(prefix) {
             if let Ok(n) = rest.parse::<u32>() {
-                if best.as_ref().map_or(true, |(b, _)| n > *b) {
+                if best.as_ref().is_none_or(|(b, _)| n > *b) {
                     best = Some((n, e.path()));
                 }
             }
@@ -154,20 +156,23 @@ pub fn launch(headed: bool) -> Result<Browser> {
             "--window-size=1280,800",
         ]);
     // Chrome's sandbox can't start as root (containers) or under some CI kernels: opt out there
-    let no_sandbox = std::env::var("WOWSIR_NO_SANDBOX").map(|v| v != "0" && !v.is_empty()).unwrap_or(false)
+    let no_sandbox = std::env::var("WOWSIR_NO_SANDBOX")
+        .map(|v| v != "0" && !v.is_empty())
+        .unwrap_or(false)
         || (cfg!(target_os = "linux") && unsafe { libc::geteuid() } == 0);
     if no_sandbox {
         cmd.arg("--no-sandbox");
     }
-    if !headed {
-        if !bin.to_string_lossy().contains("headless_shell")
-            && !bin.to_string_lossy().contains("chrome-headless-shell")
-        {
-            cmd.arg("--headless=new");
-        }
+    if !headed
+        && !bin.to_string_lossy().contains("headless_shell")
+        && !bin.to_string_lossy().contains("chrome-headless-shell")
+    {
+        cmd.arg("--headless=new");
     }
     cmd.arg("about:blank");
-    cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
     unsafe {
         cmd.pre_exec(move || {
             // Move to high fds first so dup2 onto 3/4 can't clobber a source fd.
@@ -180,7 +185,9 @@ pub fn launch(headed: bool) -> Result<Browser> {
             Ok(())
         });
     }
-    let child = cmd.spawn().with_context(|| format!("launching {}", bin.display()))?;
+    let child = cmd
+        .spawn()
+        .with_context(|| format!("launching {}", bin.display()))?;
     unsafe {
         libc::close(to_browser_r);
         libc::close(from_browser_w);
@@ -188,5 +195,9 @@ pub fn launch(headed: bool) -> Result<Browser> {
     let tx = pipe::Sender::from_owned_fd(unsafe { OwnedFd::from_raw_fd(to_browser_w) })?;
     let rx = pipe::Receiver::from_owned_fd(unsafe { OwnedFd::from_raw_fd(from_browser_r) })?;
     let cdp = Cdp::new(rx, tx);
-    Ok(Browser { cdp, child, profile })
+    Ok(Browser {
+        cdp,
+        child,
+        profile,
+    })
 }

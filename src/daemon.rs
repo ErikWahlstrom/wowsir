@@ -30,7 +30,11 @@ pub fn sock_path() -> PathBuf {
         use std::hash::{Hash, Hasher};
         let mut h = std::collections::hash_map::DefaultHasher::new();
         p.hash(&mut h);
-        return PathBuf::from(format!("/tmp/wowsir-{}-{:x}.sock", unsafe { libc::getuid() }, h.finish()));
+        return PathBuf::from(format!(
+            "/tmp/wowsir-{}-{:x}.sock",
+            unsafe { libc::getuid() },
+            h.finish()
+        ));
     }
     p
 }
@@ -64,7 +68,12 @@ pub fn build_id() -> String {
     std::env::current_exe()
         .and_then(std::fs::metadata)
         .map(|m| {
-            let t = m.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_nanos()).unwrap_or(0);
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
             format!("{t}-{}", m.len())
         })
         .unwrap_or_default()
@@ -76,12 +85,15 @@ pub struct Resp {
     pub code: i32,
 }
 
+/// A session's queue of tab opened/closed events, filled by the browser-level event loop.
+type TabQueue = Arc<std::sync::Mutex<Vec<TabEvent>>>;
+
 struct Daemon {
     browser: Mutex<Option<Browser>>,
     sessions: Mutex<HashMap<String, Arc<Mutex<Session>>>>,
     headed: bool,
     /// browserContextId -> that session's tab event queue
-    contexts: Arc<std::sync::Mutex<HashMap<String, Arc<std::sync::Mutex<Vec<TabEvent>>>>>>,
+    contexts: Arc<std::sync::Mutex<HashMap<String, TabQueue>>>,
     last_used: std::sync::Mutex<Instant>,
     build: String,
     /// sessions already told that the daemon is older than the client
@@ -92,7 +104,11 @@ pub async fn run(headed: bool) -> Result<()> {
     let d = dir();
     std::fs::create_dir_all(&d)?;
     // single-instance lock
-    let lock = std::fs::OpenOptions::new().create(true).write(true).open(d.join("daemon.lock"))?;
+    let lock = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(d.join("daemon.lock"))?;
     use std::os::fd::AsRawFd;
     if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
         return Ok(()); // another daemon is starting/running
@@ -121,7 +137,10 @@ pub async fn run(headed: bool) -> Result<()> {
     {
         let d2 = daemon.clone();
         let idle = Duration::from_secs(
-            std::env::var("WOWSIR_IDLE_SECS").ok().and_then(|v| v.parse().ok()).unwrap_or(30 * 60),
+            std::env::var("WOWSIR_IDLE_SECS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(30 * 60),
         );
         tokio::spawn(async move {
             loop {
@@ -173,7 +192,10 @@ impl Daemon {
                             let ctx = p["targetInfo"]["browserContextId"].as_str().unwrap_or("");
                             if let Some(q) = contexts.lock().unwrap().get(ctx) {
                                 q.lock().unwrap().push(TabEvent::Created {
-                                    target: p["targetInfo"]["targetId"].as_str().unwrap_or("").to_string(),
+                                    target: p["targetInfo"]["targetId"]
+                                        .as_str()
+                                        .unwrap_or("")
+                                        .to_string(),
                                     url: p["targetInfo"]["url"].as_str().unwrap_or("").to_string(),
                                 });
                             }
@@ -188,7 +210,14 @@ impl Daemon {
                     }
                 }
             });
-            let _ = br.cdp.call(None, "Target.setDiscoverTargets", serde_json::json!({"discover": true})).await;
+            let _ = br
+                .cdp
+                .call(
+                    None,
+                    "Target.setDiscoverTargets",
+                    serde_json::json!({"discover": true}),
+                )
+                .await;
             *b = Some(br);
         }
         Ok(b.as_ref().unwrap().cdp.clone())
@@ -206,9 +235,15 @@ impl Daemon {
                     if !no_auth {
                         s.load_auth_dir().await;
                     }
-                    self.contexts.lock().unwrap().insert(s.browser_ctx.clone(), s.tab_events.clone());
+                    self.contexts
+                        .lock()
+                        .unwrap()
+                        .insert(s.browser_ctx.clone(), s.tab_events.clone());
                     let s = Arc::new(Mutex::new(s));
-                    self.sessions.lock().await.insert(name.to_string(), s.clone());
+                    self.sessions
+                        .lock()
+                        .await
+                        .insert(name.to_string(), s.clone());
                     return Ok(s);
                 }
                 Err(e) => {
@@ -229,7 +264,9 @@ impl Daemon {
         BufReader::new(r).read_line(&mut line).await?;
         let req: Req = serde_json::from_str(&line)?;
         *self.last_used.lock().unwrap() = Instant::now();
-        let stale = !req.build.is_empty() && req.build != self.build && self.warned.lock().unwrap().insert(req.session.clone());
+        let stale = !req.build.is_empty()
+            && req.build != self.build
+            && self.warned.lock().unwrap().insert(req.session.clone());
         let mut resp = self.process(req).await;
         if stale && resp.code != 99 {
             resp.out.push_str("\n! wowsir was updated after this daemon started, so commands still run the old version. `wowsir stop` switches to the new one (it ends running sessions, including other agents').");
@@ -250,7 +287,12 @@ impl Daemon {
     async fn process(&self, req: Req) -> Resp {
         let cmd = req.cmd.first().map(|s| s.as_str()).unwrap_or("");
         match cmd {
-            "stop" | "quit" => return Resp { out: "wowsir daemon stopped".into(), code: 99 },
+            "stop" | "quit" => {
+                return Resp {
+                    out: "wowsir daemon stopped".into(),
+                    code: 99,
+                }
+            }
             "sessions" => {
                 let s = self.sessions.lock().await;
                 let mut out = vec![];
@@ -258,16 +300,29 @@ impl Daemon {
                     let url = sess.lock().await.url();
                     out.push(format!("{name}  {url}"));
                 }
-                return Resp { out: if out.is_empty() { "(no sessions)".into() } else { out.join("\n") }, code: 0 };
+                return Resp {
+                    out: if out.is_empty() {
+                        "(no sessions)".into()
+                    } else {
+                        out.join("\n")
+                    },
+                    code: 0,
+                };
             }
             "close" => {
                 if let Some(s) = self.sessions.lock().await.remove(&req.session) {
                     let s = s.lock().await;
                     self.contexts.lock().unwrap().remove(&s.browser_ctx);
                     s.close().await;
-                    return Resp { out: format!("closed session {}", req.session), code: 0 };
+                    return Resp {
+                        out: format!("closed session {}", req.session),
+                        code: 0,
+                    };
                 }
-                return Resp { out: format!("no session {}", req.session), code: 0 };
+                return Resp {
+                    out: format!("no session {}", req.session),
+                    code: 0,
+                };
             }
             "auth-reload" => {
                 let sessions: Vec<_> = self.sessions.lock().await.values().cloned().collect();
@@ -276,20 +331,32 @@ impl Daemon {
                     s.lock().await.load_auth_dir().await;
                     n += 1;
                 }
-                return Resp { out: format!("saved logins reloaded into {n} session(s)"), code: 0 };
+                return Resp {
+                    out: format!("saved logins reloaded into {n} session(s)"),
+                    code: 0,
+                };
             }
             "auth-forget" => {
                 // args: domains... -- origins...
                 let rest = &req.cmd[1..];
                 let split = rest.iter().position(|a| a == "--").unwrap_or(rest.len());
                 let domains: Vec<String> = rest[..split].to_vec();
-                let origins: Vec<String> = rest.get(split + 1..).map(|o| o.to_vec()).unwrap_or_default();
+                let origins: Vec<String> = rest
+                    .get(split + 1..)
+                    .map(|o| o.to_vec())
+                    .unwrap_or_default();
                 let sessions: Vec<_> = self.sessions.lock().await.values().cloned().collect();
                 let mut removed = 0;
                 for s in &sessions {
                     removed += s.lock().await.forget_site(&domains, &origins).await;
                 }
-                return Resp { out: format!("removed {removed} cookies from {} running session(s)", sessions.len()), code: 0 };
+                return Resp {
+                    out: format!(
+                        "removed {removed} cookies from {} running session(s)",
+                        sessions.len()
+                    ),
+                    code: 0,
+                };
             }
             "status" => {
                 let b = self.browser.lock().await;
@@ -308,11 +375,20 @@ impl Daemon {
             _ => {}
         }
         if req.headed && !self.headed {
-            return Resp { out: "daemon is running headless; run `wowsir stop` then retry with --headed".into(), code: 2 };
+            return Resp {
+                out: "daemon is running headless; run `wowsir stop` then retry with --headed"
+                    .into(),
+                code: 2,
+            };
         }
         let sess = match self.session(&req.session, req.no_auth).await {
             Ok(s) => s,
-            Err(e) => return Resp { out: format!("FAIL could not start browser session: {e:#}"), code: 1 },
+            Err(e) => {
+                return Resp {
+                    out: format!("FAIL could not start browser session: {e:#}"),
+                    code: 1,
+                }
+            }
         };
         let mut s = sess.lock().await;
         let ctx = Ctx {
@@ -325,7 +401,10 @@ impl Daemon {
             return run_batch(&mut s, batch, ctx).await;
         }
         let out = s.exec(&req.cmd, &ctx).await;
-        Resp { out: out.text, code: if out.ok { 0 } else { 1 } }
+        Resp {
+            out: out.text,
+            code: if out.ok { 0 } else { 1 },
+        }
     }
 }
 
@@ -334,15 +413,27 @@ async fn run_batch(s: &mut Session, steps: Vec<(usize, Vec<String>)>, ctx: Ctx) 
     let total = steps.len();
     let mut lines = vec![];
     let verbose = !ctx.quiet;
-    let step_ctx = Ctx { cwd: ctx.cwd.clone(), quiet: true, full_after: false, timeout: ctx.timeout };
+    let step_ctx = Ctx {
+        cwd: ctx.cwd.clone(),
+        quiet: true,
+        full_after: false,
+        timeout: ctx.timeout,
+    };
     for (i, (lineno, step)) in steps.iter().enumerate() {
         let last = i == total - 1;
         let c = if last && verbose { &ctx } else { &step_ctx };
         let out = s.exec(step, c).await;
         if !out.ok {
             lines.push(format!("line {lineno}: {}", out.text));
-            lines.push(format!("✗ failed at step {}/{total} · {}ms", i + 1, t0.elapsed().as_millis()));
-            return Resp { out: lines.join("\n"), code: 1 };
+            lines.push(format!(
+                "✗ failed at step {}/{total} · {}ms",
+                i + 1,
+                t0.elapsed().as_millis()
+            ));
+            return Resp {
+                out: lines.join("\n"),
+                code: 1,
+            };
         }
         if last && verbose {
             lines.push(out.text);
@@ -352,11 +443,19 @@ async fn run_batch(s: &mut Session, steps: Vec<(usize, Vec<String>)>, ctx: Ctx) 
             if let Some(h) = it.next() {
                 lines.push(h.to_string());
             }
-            for l in it.filter(|l| l.starts_with("! ") || l.starts_with("→ ") || l.starts_with("… ")) {
+            for l in
+                it.filter(|l| l.starts_with("! ") || l.starts_with("→ ") || l.starts_with("… "))
+            {
                 lines.push(format!("  {l}"));
             }
         }
     }
-    lines.push(format!("✓ {total}/{total} steps passed · {}ms", t0.elapsed().as_millis()));
-    Resp { out: lines.join("\n"), code: 0 }
+    lines.push(format!(
+        "✓ {total}/{total} steps passed · {}ms",
+        t0.elapsed().as_millis()
+    ));
+    Resp {
+        out: lines.join("\n"),
+        code: 0,
+    }
 }

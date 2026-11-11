@@ -60,7 +60,14 @@ fn run_wowsir(args: Vec<String>, session: Option<&str>, stdin: Option<&str>) -> 
     if let Some(s) = session.filter(|s| !s.is_empty()) {
         cmd.args(["-s", s]);
     }
-    cmd.args(&args).stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped());
+    cmd.args(&args)
+        .stdin(if stdin.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => return (format!("FAIL could not run wowsir: {e}"), false),
@@ -91,7 +98,10 @@ fn call_tool(name: &str, args: &Value) -> (String, bool) {
             let command = args["command"].as_str().unwrap_or("").trim();
             let command = command.strip_prefix("wowsir ").unwrap_or(command);
             if command.is_empty() {
-                return ("FAIL empty command. Example: open example.com".into(), false);
+                return (
+                    "FAIL empty command. Example: open example.com".into(),
+                    false,
+                );
             }
             if let Some(w) = crate::commands::eval_line(command) {
                 return run_wowsir(vec![w[0].clone(), "-".into()], session, Some(&w[1]));
@@ -102,7 +112,11 @@ fn call_tool(name: &str, args: &Value) -> (String, bool) {
                 Err(e) => (format!("FAIL could not parse command ({e}). Quote text with spaces: fill @e3 \"hello world\""), false),
             }
         }
-        "browser_run" => run_wowsir(vec!["run".into(), "-".into()], session, Some(args["steps"].as_str().unwrap_or(""))),
+        "browser_run" => run_wowsir(
+            vec!["run".into(), "-".into()],
+            session,
+            Some(args["steps"].as_str().unwrap_or("")),
+        ),
         _ => (format!("unknown tool {name}"), false),
     }
 }
@@ -115,8 +129,12 @@ pub fn serve() {
         if line.trim().is_empty() {
             continue;
         }
-        let Ok(msg) = serde_json::from_str::<Value>(&line) else { continue };
-        let Some(id) = msg.get("id").cloned() else { continue }; // notifications need no reply
+        let Ok(msg) = serde_json::from_str::<Value>(&line) else {
+            continue;
+        };
+        let Some(id) = msg.get("id").cloned() else {
+            continue;
+        }; // notifications need no reply
         let method = msg["method"].as_str().unwrap_or("");
         let result = match method {
             "initialize" => json!({
@@ -128,7 +146,10 @@ pub fn serve() {
             "ping" => json!({}),
             "tools/list" => json!({ "tools": tools() }),
             "tools/call" => {
-                let (text, ok) = call_tool(msg["params"]["name"].as_str().unwrap_or(""), &msg["params"]["arguments"]);
+                let (text, ok) = call_tool(
+                    msg["params"]["name"].as_str().unwrap_or(""),
+                    &msg["params"]["arguments"],
+                );
                 json!({ "content": [{ "type": "text", "text": text }], "isError": !ok })
             }
             _ => {
@@ -138,7 +159,11 @@ pub fn serve() {
                 continue;
             }
         };
-        let _ = writeln!(out, "{}", json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        let _ = writeln!(
+            out,
+            "{}",
+            json!({ "jsonrpc": "2.0", "id": id, "result": result })
+        );
         let _ = out.flush();
     }
 }
