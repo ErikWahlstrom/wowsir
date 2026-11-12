@@ -380,6 +380,7 @@ impl Session {
         let t0 = Instant::now();
         // pages the site opened/closed since the last command (e.g. a delayed popup)
         self.sync_tabs().await;
+        self.share_readonly();
         let before_url = self.url();
         let before_doc = self.st.lock().unwrap().doc_seq;
         let mut rec: Option<Vec<String>> = None;
@@ -412,7 +413,7 @@ impl Session {
                 None
             };
         let r = self.dispatch(cmd, &args, ctx, &mut rec).await;
-        match r {
+        let out = match r {
             Ok(head) => {
                 if RECORDED.contains(&cmd.as_str()) {
                     self.history.push(shell_words::join(
@@ -464,6 +465,17 @@ impl Session {
                 }
                 Out::fail(t)
             }
+        };
+        self.share_readonly();
+        // strict read-only: a step that tried to write fails, so a test catches it
+        match self.take_violations() {
+            (true, v) if !v.is_empty() && out.ok => Out::fail(format!(
+                "FAIL {}: tried to write while read-only (strict): {}\n{}",
+                shell_words::join(raw),
+                v.join(", "),
+                out.text
+            )),
+            _ => out,
         }
     }
 
@@ -1025,6 +1037,9 @@ impl Session {
                     s.world = None;
                 }
                 self.baseline = None;
+                if let Some(note) = self.readonly_for_open(&url).await {
+                    self.st.lock().unwrap().events.push(note);
+                }
                 let r = self.call("Page.navigate", json!({ "url": url })).await?;
                 if let Some(e) = r
                     .get("errorText")
@@ -2145,17 +2160,67 @@ impl Session {
                 Ok(format!("mock {}{pattern} → {what}{delay} (applies from the next request; `wowsir reload` to re-fetch)", method_prefix(&methods)))
             }
             "readonly" | "read-only" => {
-                let on = match a.pos.first().map(|s| s.as_str()) {
-                    Some("on") | None => true,
-                    Some("off") => false,
-                    Some(o) => bail!("expected readonly on|off, got {o}"),
-                };
-                self.set_readonly(on).await?;
-                Ok(if on {
-                    "read-only: POST/PUT/PATCH/DELETE requests are blocked (pages and frames; `mock` rules still answer first). `wowsir net --request URL` shows what a blocked request would have sent".into()
-                } else {
-                    "read-only off".into()
-                })
+                let sub = a.pos.first().map(|s| s.as_str());
+                match sub {
+                    Some("on" | "strict") => {
+                        let strict = sub == Some("strict");
+                        self.set_readonly(true, strict).await?;
+                        Ok(format!(
+                            "read-only{}: POST/PUT/PATCH/DELETE, WebSocket messages and GETs like /logout or /delete are blocked (this tab, its frames and tabs it opens; `mock` rules answer first){}. `wowsir net --request URL` shows what a blocked request would have sent",
+                            if strict { " (strict)" } else { "" },
+                            if strict { "; a blocked write fails the step that caused it" } else { "" }
+                        ))
+                    }
+                    Some("off") => {
+                        self.set_readonly(false, false).await?;
+                        Ok("read-only off: writes go through to the real system now. `wowsir readonly on` when you're done changing things".into())
+                    }
+                    Some("allow") => {
+                        let mut allow = self.st.lock().unwrap().ro_allow.clone();
+                        match a.pos.get(1).map(|s| s.as_str()) {
+                            None => {}
+                            Some("off" | "clear") => allow.clear(),
+                            Some(p) if !allow.iter().any(|x| x == p) => allow.push(p.to_string()),
+                            Some(_) => {}
+                        }
+                        self.set_readonly_allow(allow.clone());
+                        Ok(if allow.is_empty() {
+                            "no read-only exceptions".into()
+                        } else {
+                            format!("allowed to write even when read-only: {}", allow.join(", "))
+                        })
+                    }
+                    None | Some("status") => {
+                        let s = self.st.lock().unwrap();
+                        let mut t = if !s.readonly {
+                            "read-only off".to_string()
+                        } else if s.ro_strict {
+                            "read-only on (strict)".to_string()
+                        } else {
+                            "read-only on".to_string()
+                        };
+                        if let Some(l) = &s.ro_lock {
+                            t.push_str(&format!(" · {l}"));
+                        }
+                        if !s.ro_allow.is_empty() {
+                            t.push_str(&format!(" · allowed: {}", s.ro_allow.join(", ")));
+                        }
+                        let blocked = s
+                            .net
+                            .iter()
+                            .filter(|l| l.ends_with("(blocked: read-only)"))
+                            .count();
+                        if blocked > 0 {
+                            t.push_str(&format!(
+                                " · {blocked} request(s) blocked (`wowsir net --grep read-only`)"
+                            ));
+                        }
+                        Ok(t)
+                    }
+                    Some(o) => {
+                        bail!("expected readonly on|strict|off|allow [PATTERN|off], got {o}")
+                    }
+                }
             }
             "dialog" | "dialogs" => {
                 let accept = match a.pos.first().map(|s| s.as_str()) {

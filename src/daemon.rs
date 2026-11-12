@@ -72,7 +72,10 @@ pub struct Resp {
 }
 
 /// A session's queue of tab opened/closed events, filled by the browser-level event loop.
-type TabQueue = Arc<std::sync::Mutex<Vec<TabEvent>>>;
+type TabQueue = (
+    Arc<std::sync::Mutex<Vec<TabEvent>>>,
+    Arc<crate::session::PopupGuard>,
+);
 
 struct Daemon {
     browser: Mutex<Option<Browser>>,
@@ -162,13 +165,14 @@ impl Daemon {
             // follow pages the sites open (popups, target=_blank) and close
             let mut rx = br.cdp.subscribe("");
             let contexts = self.contexts.clone();
+            let cdp = br.cdp.clone();
             tokio::spawn(async move {
                 while let Some(ev) = rx.recv().await {
                     let p = &ev.params;
                     match ev.method.as_str() {
                         "Target.targetCreated" if p["targetInfo"]["type"] == "page" => {
                             let ctx = p["targetInfo"]["browserContextId"].as_str().unwrap_or("");
-                            if let Some(q) = contexts.lock().unwrap().get(ctx) {
+                            if let Some((q, _)) = contexts.lock().unwrap().get(ctx) {
                                 q.lock().unwrap().push(TabEvent::Created {
                                     target: p["targetInfo"]["targetId"]
                                         .as_str()
@@ -180,9 +184,26 @@ impl Daemon {
                         }
                         "Target.targetDestroyed" => {
                             let id = p["targetId"].as_str().unwrap_or("").to_string();
-                            for q in contexts.lock().unwrap().values() {
+                            for (q, _) in contexts.lock().unwrap().values() {
                                 q.lock().unwrap().push(TabEvent::Destroyed(id.clone()));
                             }
+                        }
+                        // a new page, paused before it runs: guard it if its session is read-only
+                        "Target.attachedToTarget"
+                            if p["waitingForDebugger"] == true
+                                && p["targetInfo"]["type"] == "page" =>
+                        {
+                            let ctx = p["targetInfo"]["browserContextId"].as_str().unwrap_or("");
+                            let guard = contexts.lock().unwrap().get(ctx).map(|(_, g)| g.clone());
+                            tokio::spawn(crate::session::new_page_paused(
+                                cdp.clone(),
+                                p["sessionId"].as_str().unwrap_or("").to_string(),
+                                p["targetInfo"]["targetId"]
+                                    .as_str()
+                                    .unwrap_or("")
+                                    .to_string(),
+                                guard,
+                            ));
                         }
                         _ => {}
                     }
@@ -194,6 +215,16 @@ impl Daemon {
                     None,
                     "Target.setDiscoverTargets",
                     serde_json::json!({"discover": true}),
+                )
+                .await;
+            // new pages wait for us before running anything (see PopupGuard)
+            let _ = br
+                .cdp
+                .call(
+                    None,
+                    "Target.setAutoAttach",
+                    serde_json::json!({ "autoAttach": true, "waitForDebuggerOnStart": true, "flatten": true,
+                                        "filter": [{ "type": "page" }, { "exclude": true }] }),
                 )
                 .await;
             *b = Some(br);
@@ -213,10 +244,10 @@ impl Daemon {
                     if !no_auth {
                         s.load_auth_dir().await;
                     }
-                    self.contexts
-                        .lock()
-                        .unwrap()
-                        .insert(s.browser_ctx.clone(), s.tab_events.clone());
+                    self.contexts.lock().unwrap().insert(
+                        s.browser_ctx.clone(),
+                        (s.tab_events.clone(), s.guard.clone()),
+                    );
                     let s = Arc::new(Mutex::new(s));
                     self.sessions
                         .lock()

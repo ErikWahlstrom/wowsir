@@ -16,6 +16,21 @@ pub const LIB: &str = include_str!("inject.js");
 /// Main-world shim: counts pending short timeouts so "settled" can wait for
 /// `setTimeout(render, 120)`-style UI updates. Timers created inside a timer
 /// callback are ignored, so polling loops never block settling.
+/// Main-world WebSocket guard for read-only mode: while on, outgoing messages are
+/// dropped and reported through the `__wowsir_ws` binding. Incoming messages
+/// (live updates) still arrive.
+const WS_GUARD: &str = r#"(() => {
+  if (window.__wowsir_ro || typeof WebSocket === 'undefined') return;
+  const ro = { on: false };
+  Object.defineProperty(window, '__wowsir_ro', { value: ro, enumerable: false });
+  const send = WebSocket.prototype.send;
+  WebSocket.prototype.send = function (d) {
+    if (!ro.on) return send.apply(this, arguments);
+    const what = typeof d === 'string' ? d.slice(0, 2000) : '(' + (d.byteLength || d.size || 0) + ' bytes)';
+    try { window.__wowsir_ws(JSON.stringify({ url: this.url, data: what })); } catch (e) {}
+  };
+})();"#;
+
 const TIMER_SHIM: &str = r#"(() => {
   if (window.__wowsir_t) return;
   // A pending timer only counts if the action (or a fetch/XHR it caused)
@@ -138,12 +153,22 @@ pub struct State {
     pub mocks: Vec<Mock>,
     /// `readonly on`: refuse every request that isn't GET/HEAD/OPTIONS
     pub readonly: bool,
+    /// `readonly strict`: a refused write fails the step that caused it
+    pub ro_strict: bool,
+    /// why `readonly off` is refused (a `lock` line in the readonly file)
+    pub ro_lock: Option<String>,
+    /// URL patterns that may write anyway (`readonly allow`)
+    pub ro_allow: Vec<String>,
+    /// writes refused since the step started (for strict)
+    pub ro_violations: Vec<String>,
+    /// the new-document script that switches the WebSocket guard on
+    ro_script: Option<String>,
     /// (request line, body) of requests that sent a body, for `net --request`
     pub sent: VecDeque<(String, String)>,
     /// network ids answered by a mock (done once the response arrives: Chrome only
     /// reports "finished" for a fulfilled response the page actually reads)
     mocked: std::collections::HashSet<String>,
-    /// network ids `readonly` refused
+    /// network ids `readonly` refused (logged as "blocked: read-only")
     refused: std::collections::HashSet<String>,
     /// network request ids a mock is deliberately holding back (never block settling)
     pub delayed: std::collections::HashSet<String>,
@@ -173,6 +198,11 @@ impl State {
             block_types: vec![],
             mocks: vec![],
             readonly: false,
+            ro_strict: false,
+            ro_lock: None,
+            ro_allow: vec![],
+            ro_violations: vec![],
+            ro_script: None,
             sent: VecDeque::new(),
             mocked: Default::default(),
             refused: Default::default(),
@@ -288,6 +318,81 @@ async fn fetch_setup(cdp: &Arc<Cdp>, sid: &str, st: &Arc<Mutex<State>>) -> Resul
             .await?;
     }
     Ok(())
+}
+
+/// Make read-only mode on `sid` match the state: request interception, no service
+/// worker in between (it could send writes we don't see), and the WebSocket guard.
+async fn apply_readonly(cdp: &Arc<Cdp>, sid: &str, st: &Arc<Mutex<State>>) -> Result<()> {
+    let (on, script) = {
+        let s = st.lock().unwrap();
+        (s.readonly, s.ro_script.clone())
+    };
+    fetch_setup(cdp, sid, st).await?;
+    let _ = cdp
+        .call(
+            Some(sid),
+            "Network.setBypassServiceWorker",
+            json!({ "bypass": on }),
+        )
+        .await;
+    let flag = format!("window.__wowsir_ro && (window.__wowsir_ro.on = {on})");
+    match (on, script) {
+        (true, None) => {
+            let r = cdp
+                .call(
+                    Some(sid),
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    json!({ "source": flag }),
+                )
+                .await?;
+            st.lock().unwrap().ro_script = r["identifier"].as_str().map(String::from);
+        }
+        (false, Some(id)) => {
+            let _ = cdp
+                .call(
+                    Some(sid),
+                    "Page.removeScriptToEvaluateOnNewDocument",
+                    json!({ "identifier": id }),
+                )
+                .await;
+            st.lock().unwrap().ro_script = None;
+        }
+        _ => {}
+    }
+    let _ = cdp
+        .call(Some(sid), "Runtime.evaluate", json!({ "expression": flag }))
+        .await;
+    Ok(())
+}
+
+/// Turn read-only on for a site listed in the readonly file (sticky: it stays on
+/// when the agent then leaves that site). Returns a note for the agent.
+pub fn site_rule(st: &Arc<Mutex<State>>, url: &str) -> Option<String> {
+    let rule = crate::readonly::rule_for(url)?;
+    let mut s = st.lock().unwrap();
+    let fresh = !s.readonly;
+    s.readonly = true;
+    s.ro_strict |= rule.strict;
+    if rule.lock && s.ro_lock.is_none() {
+        s.ro_lock = Some(format!(
+            "{} is locked read-only in {}",
+            rule.site,
+            crate::readonly::path().display()
+        ));
+    }
+    fresh.then(|| {
+        format!(
+            "read-only: {} is listed in {}{}, so writes are blocked{}",
+            crate::login::host_of(url),
+            crate::readonly::path().display(),
+            if rule.lock { " (locked)" } else { "" },
+            if rule.lock {
+                ""
+            } else {
+                " (`wowsir readonly off` when you mean to change something)"
+            }
+        )
+    })
 }
 
 /// The body a request sends (form posts, fetch/XHR payloads), as text.
@@ -477,6 +582,96 @@ pub struct Watch {
 }
 
 /// Browser-level page lifecycle, routed to the session owning the context.
+/// Read-only for pages that don't exist yet. Chrome pauses every new page until we
+/// let it run; if the session's active tab is read-only, the paused page first gets
+/// an early write guard (so a popup that saves on load can't slip through before
+/// wowsir adopts it), and adopt() swaps that guard for the full read-only setup.
+#[derive(Default)]
+pub struct PopupGuard {
+    /// the active tab is read-only: new pages start read-only too
+    pub readonly: std::sync::atomic::AtomicBool,
+    /// target -> the early session holding its guard
+    early: Mutex<HashMap<String, String>>,
+    /// (target, request line, body) blocked before wowsir took the page over
+    blocked: Mutex<Vec<(String, String, Option<String>)>>,
+}
+
+/// A new page, paused by Chrome before it runs anything (browser-level auto-attach).
+pub async fn new_page_paused(
+    cdp: Arc<Cdp>,
+    early: String,
+    target: String,
+    guard: Option<Arc<PopupGuard>>,
+) {
+    let resume = || cdp.call(Some(&early), "Runtime.runIfWaitingForDebugger", json!({}));
+    let ro = guard
+        .as_ref()
+        .is_some_and(|g| g.readonly.load(std::sync::atomic::Ordering::Relaxed));
+    let guarded = ro
+        && cdp
+            .call(
+                Some(&early),
+                "Fetch.enable",
+                json!({ "patterns": [{ "urlPattern": "*", "requestStage": "Request" }] }),
+            )
+            .await
+            .is_ok();
+    if !guarded {
+        let _ = resume().await;
+        let _ = cdp
+            .call(
+                None,
+                "Target.detachFromTarget",
+                json!({ "sessionId": early }),
+            )
+            .await;
+        return;
+    }
+    let g = guard.unwrap();
+    g.early
+        .lock()
+        .unwrap()
+        .insert(target.clone(), early.clone());
+    let mut rx = cdp.subscribe(&early);
+    let (cdp2, early2) = (cdp.clone(), early.clone());
+    tokio::spawn(async move {
+        while let Some(ev) = rx.recv().await {
+            if ev.method != "Fetch.requestPaused" {
+                continue;
+            }
+            let p = &ev.params;
+            let id = p["requestId"].as_str().unwrap_or("").to_string();
+            let method = p["request"]["method"].as_str().unwrap_or("GET");
+            let url = p["request"]["url"].as_str().unwrap_or("");
+            let block = crate::readonly::is_write_method(method)
+                || crate::readonly::action_get(url).is_some();
+            if block {
+                g.blocked.lock().unwrap().push((
+                    target.clone(),
+                    format!("{method} {url}"),
+                    request_body(&p["request"]),
+                ));
+                let _ = cdp2
+                    .call(
+                        Some(&early2),
+                        "Fetch.failRequest",
+                        json!({ "requestId": id, "errorReason": "BlockedByClient" }),
+                    )
+                    .await;
+            } else {
+                let _ = cdp2
+                    .call(
+                        Some(&early2),
+                        "Fetch.continueRequest",
+                        json!({ "requestId": id }),
+                    )
+                    .await;
+            }
+        }
+    });
+    let _ = resume().await;
+}
+
 pub enum TabEvent {
     Created { target: String, url: String },
     Destroyed(String),
@@ -522,6 +717,7 @@ pub struct Session {
     /// creation order of all pages, for stable `tab N` numbering
     pub tab_order: Vec<String>,
     pub tab_events: Arc<Mutex<Vec<TabEvent>>>,
+    pub guard: Arc<PopupGuard>,
 }
 
 /// Attach to a page target and start tracking it.
@@ -567,7 +763,17 @@ async fn attach_page(cdp: &Arc<Cdp>, target: &str) -> Result<(String, Arc<Mutex<
             "Page.addScriptToEvaluateOnNewDocument",
             json!({ "source": TIMER_SHIM })
         ),
+        cdp.call(
+            s,
+            "Page.addScriptToEvaluateOnNewDocument",
+            json!({ "source": WS_GUARD })
+        ),
+        cdp.call(s, "Runtime.addBinding", json!({ "name": "__wowsir_ws" })),
     )?;
+    // a page that is already loaded (an adopted tab) gets the guard now
+    let _ = cdp
+        .call(s, "Runtime.evaluate", json!({ "expression": WS_GUARD }))
+        .await;
     // cross-origin iframes and workers run in other processes: attach to them too
     let _ = cdp.call(s, "Target.setAutoAttach", auto_attach()).await;
     Ok((sid, st))
@@ -617,6 +823,7 @@ impl Session {
             tab_order: vec![target.clone()],
             tabs: vec![],
             tab_events: Arc::new(Mutex::new(vec![])),
+            guard: Arc::default(),
             timeout: Duration::from_millis(
                 std::env::var("WOWSIR_TIMEOUT")
                     .ok()
@@ -1166,13 +1373,19 @@ impl Session {
 
     async fn adopt(&mut self, target: &str, url: &str) -> Result<()> {
         let (sid, st) = attach_page(&self.cdp, target).await?;
-        let (blocking, mocks, accept, text) = {
+        let (blocking, mocks, accept, text, ro) = {
             let s = self.st.lock().unwrap();
             (
                 s.block_types.clone(),
                 s.mocks.clone(),
                 s.dialog_accept,
                 s.dialog_text.clone(),
+                (
+                    s.readonly,
+                    s.ro_strict,
+                    s.ro_lock.clone(),
+                    s.ro_allow.clone(),
+                ),
             )
         };
         {
@@ -1180,6 +1393,21 @@ impl Session {
             s.dialog_accept = accept;
             s.dialog_text = text;
             s.url = url.to_string();
+            // a popup or new tab is as read-only as the page that opened it
+            (s.readonly, s.ro_strict, s.ro_lock, s.ro_allow) = ro;
+        }
+        if st.lock().unwrap().readonly {
+            let _ = apply_readonly(&self.cdp, &sid, &st).await;
+        }
+        // our session now guards the page: drop the early guard, keep what it blocked
+        let early = self.guard.early.lock().unwrap().remove(target);
+        if let Some(e) = early {
+            let _ = self.cdp.call(Some(&e), "Fetch.disable", json!({})).await;
+            self.cdp.unsubscribe(&e);
+            let _ = self
+                .cdp
+                .call(None, "Target.detachFromTarget", json!({ "sessionId": e }))
+                .await;
         }
         // we may have attached mid-load: find out where the page is
         if let Ok(v) = self
@@ -1196,6 +1424,30 @@ impl Session {
             }
             if ready != "complete" || pending_nav {
                 s.loading = true;
+            }
+        }
+        let blocked: Vec<_> = {
+            let mut b = self.guard.blocked.lock().unwrap();
+            let (mine, rest) = std::mem::take(&mut *b)
+                .into_iter()
+                .partition(|(t, _, _)| t == target);
+            *b = rest;
+            mine
+        };
+        {
+            let mut s = st.lock().unwrap();
+            for (_, line, body) in blocked {
+                let (m, u) = line.split_once(' ').unwrap_or(("POST", &line));
+                let u = s.short_url(u);
+                s.net
+                    .push_back(format!("ERR {m} {u} Other (blocked: read-only)"));
+                s.ro_violations.push(format!("{m} {u}"));
+                s.events.push(format!(
+                    "read-only: blocked {m} {u} as the new tab loaded (`wowsir net --request {u}`)"
+                ));
+                if let Some(b) = body {
+                    s.sent.push_back((format!("{m} {u} Other"), b));
+                }
             }
         }
         let tab = Tab {
@@ -1336,9 +1588,51 @@ impl Session {
         self.apply_fetch().await
     }
 
-    pub async fn set_readonly(&self, on: bool) -> Result<()> {
-        self.st.lock().unwrap().readonly = on;
+    /// Read-only on/off (strict: blocked writes fail the step). Refuses `off` when locked.
+    pub async fn set_readonly(&self, on: bool, strict: bool) -> Result<()> {
+        {
+            let mut s = self.st.lock().unwrap();
+            if !on {
+                if let Some(why) = &s.ro_lock {
+                    bail!("{why}; only a person can change that file (then `wowsir close` and reopen)");
+                }
+            }
+            s.readonly = on;
+            s.ro_strict = on && (strict || s.ro_strict);
+            s.ro_violations.clear();
+        }
+        self.apply_readonly_all().await
+    }
+
+    pub fn set_readonly_allow(&self, allow: Vec<String>) {
+        self.st.lock().unwrap().ro_allow = allow;
+    }
+
+    /// Read-only state onto this page and its out-of-process frames.
+    async fn apply_readonly_all(&self) -> Result<()> {
+        apply_readonly(&self.cdp, &self.sid, &self.st).await?;
         self.apply_fetch().await
+    }
+
+    /// The read-only site rule for a URL we are about to open (before the request goes out).
+    pub async fn readonly_for_open(&self, url: &str) -> Option<String> {
+        let note = site_rule(&self.st, url)?;
+        let _ = self.apply_readonly_all().await;
+        Some(note)
+    }
+
+    /// Pages opened from here on start read-only if the active tab is.
+    pub fn share_readonly(&self) {
+        let on = self.st.lock().unwrap().readonly;
+        self.guard
+            .readonly
+            .store(on, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Writes refused during the step (strict mode turns them into a failure).
+    pub fn take_violations(&self) -> (bool, Vec<String>) {
+        let mut s = self.st.lock().unwrap();
+        (s.ro_strict, std::mem::take(&mut s.ro_violations))
     }
 
     pub async fn set_mocks(&self, mocks: Vec<Mock>) -> Result<()> {
@@ -1652,11 +1946,38 @@ async fn event_loop(
             "Page.frameNavigated" => {
                 let f = &p["frame"];
                 if f.get("parentId").is_none() {
-                    let mut s = st.lock().unwrap();
-                    s.url = f["url"].as_str().unwrap_or("").to_string()
-                        + f["urlFragment"].as_str().unwrap_or("");
-                    s.world = None;
-                    s.doc_seq += 1;
+                    let url = f["url"].as_str().unwrap_or("").to_string();
+                    {
+                        let mut s = st.lock().unwrap();
+                        s.url = url.clone() + f["urlFragment"].as_str().unwrap_or("");
+                        s.world = None;
+                        s.doc_seq += 1;
+                    }
+                    // followed a link or redirect onto a read-only site
+                    if let Some(note) = site_rule(&st, &url) {
+                        st.lock().unwrap().events.push(note);
+                        let (cdp, sid, st) = (cdp.clone(), sid.clone(), st.clone());
+                        tokio::spawn(async move {
+                            let _ = apply_readonly(&cdp, &sid, &st).await;
+                        });
+                    }
+                }
+            }
+            "Runtime.bindingCalled" if p["name"] == "__wowsir_ws" => {
+                let v: Value =
+                    serde_json::from_str(p["payload"].as_str().unwrap_or("{}")).unwrap_or_default();
+                let url = v["url"].as_str().unwrap_or("?").to_string();
+                let data = v["data"].as_str().unwrap_or("").to_string();
+                let mut s = st.lock().unwrap();
+                let u = s.short_url(&url);
+                s.ro_violations.push(format!("WebSocket {u}"));
+                s.events.push(format!(
+                    "read-only: blocked a WebSocket message to {u}: {}",
+                    clip(&data, 120)
+                ));
+                s.sent.push_back((format!("WS {u} WebSocket"), data));
+                while s.sent.len() > 100 {
+                    s.sent.pop_front();
                 }
             }
             "Page.navigatedWithinDocument" => {
@@ -1729,7 +2050,7 @@ async fn event_loop(
                 let url = p["request"]["url"].as_str().unwrap_or("");
                 let rtype = p["resourceType"].as_str().unwrap_or("");
                 let method = p["request"]["method"].as_str().unwrap_or("GET").to_string();
-                let write = !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS");
+                let write = crate::readonly::is_write_method(&method);
                 let (mock, blocked) = {
                     let mut s = st.lock().unwrap();
                     let i = s.mocks.iter().position(|m| {
@@ -1760,13 +2081,23 @@ async fn event_loop(
                             s.net.push_back(line);
                         }
                     }
-                    let refuse = mock.is_none() && s.readonly && write;
+                    let allowed = s.ro_allow.iter().any(|a| glob_match(&url_glob(a), url));
+                    let action = (!write).then(|| crate::readonly::action_get(url)).flatten();
+                    let refuse =
+                        mock.is_none() && s.readonly && !allowed && (write || action.is_some());
                     if refuse {
                         let u = s.short_url(url);
                         s.refused.insert(nid);
-                        s.events.push(format!(
-                            "read-only: blocked {method} {u} (`wowsir net --request {u}` shows what it sent)"
-                        ));
+                        let why = match action {
+                            Some(w) => format!(
+                                "blocked GET {u} (its path says `{w}`; `wowsir readonly allow {u}` if it only reads)"
+                            ),
+                            None => format!(
+                                "blocked {method} {u} (`wowsir net --request {u}` shows what it sent)"
+                            ),
+                        };
+                        s.ro_violations.push(format!("{method} {u}"));
+                        s.events.push(format!("read-only: {why}"));
                     }
                     (mock, refuse || s.block_types.iter().any(|t| t == rtype))
                 };

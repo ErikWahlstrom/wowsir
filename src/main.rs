@@ -6,6 +6,7 @@ mod keys;
 mod login;
 mod mcp;
 mod platform;
+mod readonly;
 mod session;
 
 use daemon::{Req, Resp};
@@ -20,7 +21,9 @@ LAYOUT     watch T... · watch (list) · watch off [T]   watched elements report
            expect still [T...] · screenshot [PATH] --mark (outlines + coordinates of watched elements) · --mark=T
 MOCK       mock [METHOD] PATTERN STATUS|abort [--json X|--body X|--file F] [--delay MS] [--doc] · mock (list) · mock off [PATTERN]
              PATTERN: URL substring or glob; METHOD: POST, PUT|DELETE... (default any); page loads only with --doc
-           readonly on|off   block every POST/PUT/PATCH/DELETE (look, don't touch a live system); `net --request` shows what was sent
+           readonly on|strict|off · readonly allow PATTERN|off · readonly (status)
+             blocks POST/PUT/PATCH/DELETE, WebSocket sends and GETs like /logout; strict = a blocked write fails the step
+             sites listed in ~/.wowsir/readonly open read-only (`lock` after a site: agents can't turn it off)
 TABS       popups and target=_blank pages are followed automatically (! new tab N…)
            tabs · tab N · tab new [URL] · tab close [N]
 SEE        snap [-i] [--grep TEXT] [--in TARGET] [--viewport] [--full] [--urls] [--ids] [--all]

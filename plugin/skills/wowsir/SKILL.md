@@ -9,6 +9,24 @@ description: Test and drive websites with the `wowsir` headless browser CLI. Use
 
 Run each `wowsir` command on its own, or chain them with `&&` / `;`. Don't pipe its output into other commands (`wowsir text | head`), redirect it (`> /dev/null`), or wrap it in `$(...)`. Those calls get sandboxed, and wowsir can't reach its daemon there. Use wowsir's own filters (`--grep`, `--max`, `--in`) instead. If even plain `wowsir` calls fail with socket or permission errors, the sandbox is blocking it: tell the user to add `"sandbox": { "excludedCommands": ["wowsir *"] }` to their Claude Code settings, or to use wowsir's MCP server.
 
+## Read-only: look without changing anything
+
+On a real or shared system (production, a customer's tenant, anything you weren't asked to change), turn read-only on before you click around:
+
+```bash
+wowsir readonly on
+```
+
+Then saves, deletes, form posts, WebSocket messages and GETs whose path says `logout`/`delete`/`remove` are blocked. That covers this tab, its frames, and popups or tabs it opens (from their first request). Each block prints `! read-only: blocked POST /api/lights/3 …`, the page shows its normal failure, and `wowsir net --request /api/lights` shows the payload it would have sent. Clicking Save to see what a form sends is therefore safe.
+
+- Some sites open read-only by themselves: the user lists them in `~/.wowsir/readonly`, and `open` says so. A line with `lock` means you can't turn it off; ask the user instead of working around it.
+- When the user asks you to change something, turn it off for that one change, then on again:
+  `wowsir readonly off` → do the update → `wowsir readonly on`. Say in your reply that you made a real change.
+- A request that only reads but is sent as POST (search, GraphQL queries, a SignalR connect): `wowsir readonly allow /api/search`.
+- `mock` rules answer before read-only, so `mock POST /api/save 200` fakes a successful save while everything else stays blocked.
+- Tests: put `readonly strict` at the top of a `.wowsir` file. A step that tries to write then fails the test (`tried to write while read-only (strict): POST /api/…`), so an accidental write is caught instead of happening.
+- `wowsir readonly` shows the state and how many requests were blocked.
+
 ## Login
 
 Saved logins (`~/.wowsir/auth/*.json`) load into every new session automatically. If an action prints `! redirected to a login page`, don't try to log in yourself. Ask the user to run `! wowsir login <site-url>`: a window opens, they sign in, and the cookies are saved and pushed into running sessions. If they have a debug Chrome open, `wowsir login --from http://127.0.0.1:9222 <domain>` copies the cookies from it. Use `--no-auth` for a logged-out session. To test the logged-out experience, or to force a fresh sign-in, run `wowsir logout <site>`: it deletes the saved login and wipes that site's cookies and storage from running sessions.
@@ -88,7 +106,6 @@ Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by o
 - Multi-select: `wowsir click @e5 --mod` (Cmd on macOS, Ctrl elsewhere), `--shift`, `--ctrl`, `--alt`.
 - Long dropdowns: `wowsir snap --full` lists every option untruncated.
 - Error/empty/loading states without touching the backend: `wowsir mock /api/items 500`, `wowsir mock /api/items --json '{"items":[]}'`, `wowsir mock /api/items abort` (network failure), `wowsir mock /api/items --delay 3000` (the action returns while the request is held, so you see the loading state). The pattern is a URL substring or glob. `wowsir mock` lists mocks with hit counts, `wowsir mock off` clears them. Mocks apply from the next request, so click refresh or `wowsir reload`. Put a method first to mock only that: `wowsir mock POST /api/lights 200 --json '{}'` fakes the save while the GET that loads the page stays real.
-- Looking at a live or shared system: `wowsir readonly on` blocks every POST/PUT/PATCH/DELETE for the session (each block prints `! read-only: blocked POST /api/...`). Clicking Save is then safe, and `wowsir net --request /api/...` shows what it would have sent. A `mock` for the same request still answers first.
 - Tabs: when a click opens a popup or a `target=_blank` page, wowsir switches to it and prints `! new tab N opened`. When a popup closes itself (e.g. after a sign-in), wowsir goes back to the opener. `wowsir tabs` lists tabs, `wowsir tab N` switches, `wowsir tab close` closes the current one.
 - Speed up heavy pages: `wowsir block lite` (blocks images, fonts, and media).
 - Waiting: actions already wait for the page to settle. Use `wowsir wait text "Done"`, `wowsir wait gone ".spinner"`, or `--timeout 15000` for slow things.
