@@ -8,7 +8,7 @@ repository = "https://github.com/ErikWahlstrom/wowsir"
 readme = "README.md"
 keywords = ["browser", "testing", "cdp", "mcp", "agents"]
 categories = ["development-tools::testing", "command-line-utilities", "web-programming"]
-include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/skill/SKILL.md"]
+include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE", "/plugin/skills/wowsir/SKILL.md"]
 
 # `cargo binstall wowsir` downloads the GitHub release binary instead of compiling
 [package.metadata.binstall]

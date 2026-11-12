@@ -15,6 +15,8 @@ jobs:
       - run: |
           v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
           [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $v"; exit 1; }
+          p=$(jq -r .version plugin/.claude-plugin/plugin.json)
+          [ "$p" = "$v" ] || { echo "plugin.json says $p but Cargo.toml says $v"; exit 1; }
 
   build:
     needs: check
@@ -40,7 +42,7 @@ jobs:
           mkdir "$name"
           exe=""; [ "$RUNNER_OS" = Windows ] && exe=".exe"
           cp "target/${{ matrix.target }}/release/wowsir$exe" README.md LICENSE "$name/"
-          cp -r skill "$name/"
+          mkdir "$name/skills" && cp -r plugin/skills/wowsir "$name/skills/"
           if [ "$RUNNER_OS" = Windows ]; then 7z a "$name.zip" "$name" >/dev/null; else tar czf "$name.tar.gz" "$name"; fi
       - uses: actions/upload-artifact@v4
         with:
