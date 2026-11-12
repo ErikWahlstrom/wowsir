@@ -1,0 +1,13 @@
+{
+  "name": "wowsir",
+  "version": "0.1.1",
+  "description": "Test and drive websites with the wowsir headless browser CLI: check pages and flows, verify UI changes, reproduce frontend bugs, write and run browser tests. Needs the wowsir binary on PATH.",
+  "author": {
+    "name": "Erik Wahlström",
+    "url": "https://github.com/ErikWahlstrom"
+  },
+  "homepage": "https://github.com/ErikWahlstrom/wowsir",
+  "repository": "https://github.com/ErikWahlstrom/wowsir",
+  "license": "MIT",
+  "keywords": ["browser", "testing", "headless", "chromium", "e2e"]
+}

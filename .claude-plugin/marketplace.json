@@ -1,0 +1,15 @@
+{
+  "name": "wowsir",
+  "description": "wowsir: a fast, headless, agent-first browser for testing websites",
+  "owner": {
+    "name": "Erik Wahlström",
+    "url": "https://github.com/ErikWahlstrom"
+  },
+  "plugins": [
+    {
+      "name": "wowsir",
+      "source": "./plugin",
+      "description": "Skill that teaches Claude to test and drive websites with the wowsir CLI (install the wowsir binary separately)"
+    }
+  ]
+}

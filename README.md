@@ -71,6 +71,30 @@ npx playwright install chromium-headless-shell   # optional, fastest
 WOWSIR_CHROME=/path/to/chrome                    # override
 ```
 
+## Use with coding agents
+
+Install the binary first (above). Then give your agent the wowsir skill, which teaches it the commands, targets and test files.
+
+**Claude Code** — install the plugin, inside a session:
+
+```
+/plugin install wowsir --marketplace ErikWahlstrom/wowsir
+```
+
+On Claude Code before 2.1.275, run `/plugin marketplace add ErikWahlstrom/wowsir`, then `/plugin install wowsir@wowsir`. The skill updates with each wowsir release when you run `/plugin marketplace update wowsir`, or turn on auto-update for the marketplace in `/plugin`.
+
+**Codex and other agents that read Agent Skills** — copy the skill into your skills folder:
+
+```sh
+mkdir -p ~/.agents/skills/wowsir
+curl -fsSL -o ~/.agents/skills/wowsir/SKILL.md \
+  https://raw.githubusercontent.com/ErikWahlstrom/wowsir/main/plugin/skills/wowsir/SKILL.md
+```
+
+The release downloads include it too, as `skills/wowsir/SKILL.md`. For Claude Code without the plugin, put it in `~/.claude/skills/wowsir/`.
+
+Agents without a shell can use wowsir as an [MCP server](#as-an-mcp-server) instead.
+
 ## Usage
 
 ```
