@@ -59,6 +59,8 @@ pub struct Req {
 #[derive(Clone, Debug)]
 pub struct Mock {
     pub pattern: String,
+    /// only these methods (upper case); empty = any method
+    pub methods: Vec<String>,
     /// 0 = let it through (after `delay_ms`)
     pub status: u16,
     pub body: Vec<u8>,
@@ -134,6 +136,15 @@ pub struct State {
     pub dialog_text: Option<String>,
     pub block_types: Vec<String>,
     pub mocks: Vec<Mock>,
+    /// `readonly on`: refuse every request that isn't GET/HEAD/OPTIONS
+    pub readonly: bool,
+    /// (request line, body) of requests that sent a body, for `net --request`
+    pub sent: VecDeque<(String, String)>,
+    /// network ids answered by a mock (done once the response arrives: Chrome only
+    /// reports "finished" for a fulfilled response the page actually reads)
+    mocked: std::collections::HashSet<String>,
+    /// network ids `readonly` refused
+    refused: std::collections::HashSet<String>,
     /// network request ids a mock is deliberately holding back (never block settling)
     pub delayed: std::collections::HashSet<String>,
 }
@@ -161,6 +172,10 @@ impl State {
             dialog_text: None,
             block_types: vec![],
             mocks: vec![],
+            readonly: false,
+            sent: VecDeque::new(),
+            mocked: Default::default(),
+            refused: Default::default(),
             delayed: Default::default(),
         }
     }
@@ -251,6 +266,10 @@ async fn fetch_setup(cdp: &Arc<Cdp>, sid: &str, st: &Arc<Mutex<State>>) -> Resul
                 .chain(s.mocks.iter().map(
                     |m| json!({ "urlPattern": url_glob(&m.pattern), "requestStage": "Request" }),
                 ))
+                .chain(
+                    s.readonly
+                        .then(|| json!({ "urlPattern": "*", "requestStage": "Request" })),
+                )
                 .collect(),
             !s.mocks.is_empty(),
         )
@@ -269,6 +288,31 @@ async fn fetch_setup(cdp: &Arc<Cdp>, sid: &str, st: &Arc<Mutex<State>>) -> Resul
             .await?;
     }
     Ok(())
+}
+
+/// The body a request sends (form posts, fetch/XHR payloads), as text.
+fn request_body(req: &Value) -> Option<String> {
+    if let Some(d) = req["postData"].as_str() {
+        return Some(clip(d, 20_000));
+    }
+    let entries = req["postDataEntries"].as_array()?;
+    use base64::Engine;
+    let mut bytes = vec![];
+    for e in entries {
+        if let Some(b) = e["bytes"].as_str() {
+            bytes.extend(base64::engine::general_purpose::STANDARD.decode(b).ok()?);
+        }
+    }
+    if bytes.is_empty() {
+        return req["hasPostData"]
+            .as_bool()
+            .filter(|h| *h)
+            .map(|_| "(body not captured)".to_string());
+    }
+    Some(match String::from_utf8(bytes) {
+        Ok(t) => clip(&t, 20_000),
+        Err(e) => format!("({} bytes of binary data)", e.into_bytes().len()),
+    })
 }
 
 /// Children start paused until listeners (and mocks) are set up, then attach_child resumes them.
@@ -1264,8 +1308,36 @@ impl Session {
         }
     }
 
+    /// A finger tap: touchStart + touchEnd (the page gets touch events, then the
+    /// click the browser synthesizes from them).
+    pub async fn tap(&self, x: f64, y: f64) -> Result<()> {
+        for (kind, pts) in [
+            ("touchStart", json!([{ "x": x, "y": y }])),
+            ("touchEnd", json!([])),
+        ] {
+            match self
+                .call(
+                    "Input.dispatchTouchEvent",
+                    json!({ "type": kind, "touchPoints": pts, "modifiers": self.click_mods }),
+                )
+                .await
+            {
+                Err(e) if crate::cdp::is_target_gone(&e) => return Ok(()),
+                r => {
+                    r?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub async fn set_blocking(&self, types: Vec<String>) -> Result<()> {
         self.st.lock().unwrap().block_types = types;
+        self.apply_fetch().await
+    }
+
+    pub async fn set_readonly(&self, on: bool) -> Result<()> {
+        self.st.lock().unwrap().readonly = on;
         self.apply_fetch().await
     }
 
@@ -1421,6 +1493,18 @@ async fn event_loop(
                 if p["type"] == "Document" && p["frameId"] == target.as_str() {
                     s.doc_status = 0;
                 }
+                if let Some(body) = request_body(&p["request"]) {
+                    let line = format!(
+                        "{} {} {}",
+                        p["request"]["method"].as_str().unwrap_or("POST"),
+                        s.short_url(p["request"]["url"].as_str().unwrap_or("")),
+                        p["type"].as_str().unwrap_or("Other")
+                    );
+                    s.sent.push_back((line, body));
+                    while s.sent.len() > 100 {
+                        s.sent.pop_front();
+                    }
+                }
                 s.inflight.insert(
                     id.clone(),
                     Req {
@@ -1445,6 +1529,20 @@ async fn event_loop(
                 if let Some(r) = s.inflight.get_mut(id) {
                     r.status = status;
                 }
+                if s.mocked.remove(id) {
+                    if let Some(r) = s.inflight.remove(id) {
+                        let u = s.short_url(&r.url);
+                        let line = format!(
+                            "{status} {} {u} {} {}ms (mocked)",
+                            r.method,
+                            r.rtype,
+                            r.start.elapsed().as_millis()
+                        );
+                        s.net.push_back(line.clone());
+                        s.done.push_back((id.to_string(), line));
+                        s.last_net_change = Instant::now();
+                    }
+                }
             }
             "Network.loadingFinished" | "Network.loadingFailed" => {
                 let id = p["requestId"].as_str().unwrap_or("");
@@ -1457,11 +1555,13 @@ async fn event_loop(
                 let ms = r.start.elapsed().as_millis();
                 let u = s.short_url(&r.url);
                 if ev.method == "Network.loadingFailed" {
+                    let ro = s.refused.remove(id);
                     let err = match (
                         p["errorText"].as_str().filter(|e| !e.is_empty()),
                         p["blockedReason"].as_str(),
                         p["corsErrorStatus"]["corsError"].as_str(),
                     ) {
+                        _ if ro => "blocked: read-only".to_string(),
                         (_, Some(b), _) => format!("blocked: {b}"),
                         (_, _, Some(c)) => format!("CORS: {c}"),
                         (Some(e), _, _) => e.to_string(),
@@ -1629,10 +1729,13 @@ async fn event_loop(
                 let url = p["request"]["url"].as_str().unwrap_or("");
                 let rtype = p["resourceType"].as_str().unwrap_or("");
                 let method = p["request"]["method"].as_str().unwrap_or("GET").to_string();
+                let write = !matches!(method.as_str(), "GET" | "HEAD" | "OPTIONS");
                 let (mock, blocked) = {
                     let mut s = st.lock().unwrap();
                     let i = s.mocks.iter().position(|m| {
-                        (m.doc || rtype != "Document") && glob_match(&url_glob(&m.pattern), url)
+                        (m.doc || rtype != "Document")
+                            && (m.methods.is_empty() || m.methods.contains(&method))
+                            && glob_match(&url_glob(&m.pattern), url)
                     });
                     let mock = i.map(|i| {
                         s.mocks[i].hits += 1;
@@ -1643,18 +1746,29 @@ async fn event_loop(
                             s.delayed.insert(nid.to_string());
                         }
                     }
+                    let nid = p["networkId"].as_str().unwrap_or("").to_string();
                     if let Some(m) = &mock {
-                        let what = if m.abort {
-                            "abort".to_string()
-                        } else if m.status == 0 {
-                            format!("delay {}ms", m.delay_ms)
+                        if m.status > 0 && !m.abort {
+                            s.mocked.insert(nid.clone()); // logged as "(mocked)" when answered
                         } else {
-                            m.status.to_string()
-                        };
-                        let line = format!("MOCK {what} {method} {}", s.short_url(url));
-                        s.net.push_back(line);
+                            let what = if m.abort {
+                                "abort".to_string()
+                            } else {
+                                format!("delay {}ms", m.delay_ms)
+                            };
+                            let line = format!("MOCK {what} {method} {} {rtype}", s.short_url(url));
+                            s.net.push_back(line);
+                        }
                     }
-                    (mock, s.block_types.iter().any(|t| t == rtype))
+                    let refuse = mock.is_none() && s.readonly && write;
+                    if refuse {
+                        let u = s.short_url(url);
+                        s.refused.insert(nid);
+                        s.events.push(format!(
+                            "read-only: blocked {method} {u} (`wowsir net --request {u}` shows what it sent)"
+                        ));
+                    }
+                    (mock, refuse || s.block_types.iter().any(|t| t == rtype))
                 };
                 tokio::spawn(async move {
                     let (m, p) = match mock {

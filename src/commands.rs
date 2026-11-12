@@ -49,19 +49,54 @@ pub struct Args {
 }
 
 const VALUE_FLAGS: &[&str] = &[
-    "from", "grep", "g", "in", "max", "timeout", "t", "el", "out", "o", "button", "json", "body",
-    "file", "delay", "type",
+    "from",
+    "grep",
+    "g",
+    "in",
+    "max",
+    "timeout",
+    "t",
+    "el",
+    "out",
+    "o",
+    "button",
+    "json",
+    "body",
+    "file",
+    "delay",
+    "type",
+    "at",
+    "request",
+    "request-body",
+    "sent",
 ];
 
-/// Split a wowsir command line like a shell, except for `#`: `# note` (hash then
-/// space) starts a comment, while `#id` is a CSS selector, not a comment.
+/// Split a wowsir command line like a shell, with two exceptions:
+/// - `#`: `# note` (hash then space) starts a comment, while `#id` is a CSS selector.
+/// - CSS attribute selectors outside quotes keep their quotes and spaces as written:
+///   `click [aria-label^="Click a light"]` stays one target with its quotes.
 pub fn split_line(line: &str) -> Result<Vec<String>, shell_words::ParseError> {
     let mut out = String::with_capacity(line.len() + 4);
     let (mut sq, mut dq, mut esc) = (false, false, false);
+    // inside an unquoted [...]: depth, and the attribute value's quote char if in one
+    let (mut depth, mut aq): (u32, Option<char>) = (0, None);
     let chars: Vec<char> = line.chars().collect();
     for (i, &c) in chars.iter().enumerate() {
         if esc {
             esc = false;
+        } else if depth > 0 && !sq && !dq {
+            match (aq, c) {
+                (None, '"' | '\'') => aq = Some(c),
+                (Some(q), _) if q == c => aq = None,
+                (None, '[') => depth += 1,
+                (None, ']') => depth -= 1,
+                _ => {}
+            }
+            if c == '"' || c == '\'' || c == '\\' || c.is_whitespace() {
+                out.push('\\'); // literal for the shell split
+            }
+        } else if c == '[' && !sq && !dq {
+            depth = 1;
         } else if c == '\\' && !sq {
             esc = true;
         } else if c == '\'' && !dq {
@@ -277,17 +312,47 @@ fn snap_header(title: &str, url: &str) -> String {
     }
 }
 
+/// "458,341" / "458.5, 341": a viewport point (CSS pixels)
+fn parse_point(s: &str) -> Option<(f64, f64)> {
+    let (x, y) = s.split_once(',')?;
+    let (x, y) = (x.trim().parse::<f64>().ok()?, y.trim().parse::<f64>().ok()?);
+    (x.is_finite() && y.is_finite()).then_some((x, y))
+}
+
+fn fmt_num(v: f64) -> String {
+    if v.fract() == 0.0 {
+        format!("{}", v as i64)
+    } else {
+        format!("{v}")
+    }
+}
+
+/// "POST", "PUT|DELETE": an HTTP method filter for `mock` (upper case, so a URL
+/// pattern like `post` stays a pattern)
+fn is_methods(s: &str) -> bool {
+    const M: &[&str] = &["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"];
+    s.split('|').all(|m| M.contains(&m))
+}
+
+fn method_prefix(m: &[String]) -> String {
+    if m.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", m.join("|"))
+    }
+}
+
 // ----------------------------------------------------------------- dispatcher
 
 pub const MUTATING: &[&str] = &[
     "open", "goto", "back", "forward", "reload", "click", "dblclick", "fill", "type", "press",
     "select", "check", "uncheck", "hover", "scroll", "upload", "focus", "viewport", "resize",
-    "theme", "tab",
+    "theme", "tab", "tap",
 ];
 pub const RECORDED: &[&str] = &[
     "open", "goto", "back", "forward", "reload", "click", "dblclick", "fill", "type", "press",
     "select", "check", "uncheck", "hover", "scroll", "upload", "focus", "wait", "expect",
-    "viewport", "theme", "block", "dialog", "tab", "mock", "watch",
+    "viewport", "theme", "block", "dialog", "tab", "mock", "watch", "readonly", "tap",
 ];
 
 impl Session {
@@ -1118,6 +1183,58 @@ impl Session {
                 }
                 Ok(t)
             }
+            "click" | "dblclick" | "tap"
+                if a.get(&["at"])
+                    .or(a.pos.first().map(|s| s.as_str()))
+                    .and_then(parse_point)
+                    .is_some() =>
+            {
+                // a point in the viewport: map markers, canvas, anything without an element to name
+                let raw = a
+                    .get(&["at"])
+                    .or(a.pos.first().map(|s| s.as_str()))
+                    .unwrap();
+                let (x, y) = parse_point(raw).unwrap();
+                let what = self
+                    .k("describeAt", &[json!(x), json!(y)])
+                    .await?
+                    .as_str()
+                    .unwrap_or("?")
+                    .to_string();
+                if cmd == "tap" {
+                    self.tap(x, y).await?;
+                } else {
+                    let count = if cmd == "dblclick" || a.has(&["double"]) {
+                        2
+                    } else {
+                        1
+                    };
+                    let button = if a.has(&["right"]) { "right" } else { "left" };
+                    self.mouse("mouseMoved", x, y, "none", 0).await?;
+                    for i in 1..=count {
+                        self.mouse("mousePressed", x, y, button, i).await?;
+                        self.mouse("mouseReleased", x, y, button, i).await?;
+                    }
+                }
+                let pt = format!("{},{}", fmt_num(x), fmt_num(y));
+                *rec = Some(vec![cmd.to_string(), "--at".into(), pt.clone()]);
+                Ok(format!("{cmd} at {pt} → {what}"))
+            }
+            "tap" => {
+                let target = a.p(0, "target")?;
+                let v = self
+                    .actionable("point", &[json!(target), json!(Self::is_ref(target))], to)
+                    .await?;
+                self.tap(
+                    v["x"].as_f64().unwrap_or(0.0),
+                    v["y"].as_f64().unwrap_or(0.0),
+                )
+                .await?;
+                if let Some(sel) = v["sel"].as_str() {
+                    *rec = Some(vec!["tap".into(), sel.into()]);
+                }
+                Ok(format!("tap {}", v["desc"].as_str().unwrap_or(target)))
+            }
             "click" | "dblclick" => {
                 let target = a.p(0, "target")?;
                 let count = if cmd == "dblclick" || a.has(&["double"]) {
@@ -1638,6 +1755,33 @@ impl Session {
                     out.join("\n")
                 })
             }
+            "net" | "network" if a.get(&["request", "request-body", "sent"]).is_some() => {
+                let pat = a
+                    .get(&["request", "request-body", "sent"])
+                    .unwrap_or("")
+                    .to_lowercase();
+                let s = self.st.lock().unwrap();
+                let hits: Vec<&(String, String)> = s
+                    .sent
+                    .iter()
+                    .filter(|(l, _)| {
+                        let l = l.to_lowercase();
+                        pat.split('|').map(str::trim).any(|p| l.contains(p))
+                    })
+                    .collect();
+                let n = if a.has(&["all"]) { hits.len() } else { 1 };
+                if hits.is_empty() {
+                    bail!("no request with a body matches '{pat}' (only requests that send a body are kept: POST/PUT/PATCH...)");
+                }
+                let out: Vec<String> = hits
+                    .iter()
+                    .rev()
+                    .take(n)
+                    .rev()
+                    .map(|(l, b)| format!("{l}\n{b}"))
+                    .collect();
+                Ok(out.join("\n\n"))
+            }
             "net" | "network" if a.get(&["body"]).is_some() => {
                 let pat = a.get(&["body"]).unwrap_or("").to_lowercase();
                 let parts: Vec<&str> = pat
@@ -1657,6 +1801,9 @@ impl Session {
                         .cloned()
                 };
                 let (id, line) = hit.ok_or_else(|| anyhow!("no completed response matches '{pat}' (wowsir net lists requests; streams show up once they finish)"))?;
+                if line.ends_with("(mocked)") {
+                    bail!("{line}: answered by a mock, so the body is the one you gave it (`wowsir mock` lists them)");
+                }
                 let r = self
                     .call("Network.getResponseBody", json!({ "requestId": id }))
                     .await
@@ -1706,9 +1853,9 @@ impl Session {
                         !failed || l.starts_with("ERR") || l.starts_with('4') || l.starts_with('5')
                     })
                     .filter(|l| {
-                        !api || l.contains(" XHR ")
-                            || l.contains(" Fetch ")
-                            || l.contains(" Document ")
+                        !api || l
+                            .split_whitespace()
+                            .any(|w| matches!(w, "XHR" | "Fetch" | "Document"))
                     })
                     .filter(|l| {
                         grep.as_ref().is_none_or(|g| {
@@ -1867,7 +2014,16 @@ impl Session {
             }
             "mock" | "mocks" => {
                 let mut mocks = self.st.lock().unwrap().mocks.clone();
-                let Some(pattern) = a.pos.first().cloned() else {
+                // optional method filter first: `mock POST /api/x 500`, `mock PUT|DELETE /api abort`
+                let methods: Vec<String> = match a.pos.first() {
+                    Some(m) if is_methods(m) => m.split('|').map(String::from).collect(),
+                    _ => vec![],
+                };
+                let pos: Vec<String> = a.pos[if methods.is_empty() { 0 } else { 1 }..].to_vec();
+                let Some(pattern) = pos.first().cloned() else {
+                    if !methods.is_empty() {
+                        bail!("mock {} needs a URL pattern", methods.join("|"));
+                    }
                     if mocks.is_empty() {
                         return Ok("no mocks".into());
                     }
@@ -1886,13 +2042,18 @@ impl Session {
                             } else {
                                 String::new()
                             };
-                            format!("{} → {what}{delay} · {} hit(s)", m.pattern, m.hits)
+                            format!(
+                                "{}{} → {what}{delay} · {} hit(s)",
+                                method_prefix(&m.methods),
+                                m.pattern,
+                                m.hits
+                            )
                         })
                         .collect();
                     return Ok(lines.join("\n"));
                 };
                 if pattern == "off" || pattern == "clear" {
-                    match a.pos.get(1) {
+                    match pos.get(1) {
                         Some(p) => mocks.retain(|m| m.pattern != *p),
                         None => mocks.clear(),
                     }
@@ -1904,7 +2065,7 @@ impl Session {
                         format!("mock off · {n} left")
                     });
                 }
-                let second = a.pos.get(1).map(|s| s.as_str());
+                let second = pos.get(1).map(|s| s.as_str());
                 let abort = matches!(second, Some("abort" | "fail" | "offline"));
                 let mut status: u16 = match second {
                     Some(s) if !abort => s
@@ -1950,6 +2111,7 @@ impl Session {
                 let ctype = a.get(&["type"]).map(String::from).unwrap_or(ctype);
                 let m = Mock {
                     pattern: pattern.clone(),
+                    methods: methods.clone(),
                     status,
                     body,
                     ctype,
@@ -1977,10 +2139,23 @@ impl Session {
                 } else {
                     String::new()
                 };
-                mocks.retain(|x| x.pattern != pattern);
+                mocks.retain(|x| !(x.pattern == pattern && x.methods == methods));
                 mocks.push(m);
                 self.set_mocks(mocks).await?;
-                Ok(format!("mock {pattern} → {what}{delay} (applies from the next request; `wowsir reload` to re-fetch)"))
+                Ok(format!("mock {}{pattern} → {what}{delay} (applies from the next request; `wowsir reload` to re-fetch)", method_prefix(&methods)))
+            }
+            "readonly" | "read-only" => {
+                let on = match a.pos.first().map(|s| s.as_str()) {
+                    Some("on") | None => true,
+                    Some("off") => false,
+                    Some(o) => bail!("expected readonly on|off, got {o}"),
+                };
+                self.set_readonly(on).await?;
+                Ok(if on {
+                    "read-only: POST/PUT/PATCH/DELETE requests are blocked (pages and frames; `mock` rules still answer first). `wowsir net --request URL` shows what a blocked request would have sent".into()
+                } else {
+                    "read-only off".into()
+                })
             }
             "dialog" | "dialogs" => {
                 let accept = match a.pos.first().map(|s| s.as_str()) {
@@ -2322,5 +2497,55 @@ fn truncate_chars(s: &str, max: usize) -> String {
             s.chars().take(max).collect::<String>(),
             n - max
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_point, split_line};
+
+    fn sp(s: &str) -> Vec<String> {
+        split_line(s).unwrap()
+    }
+
+    #[test]
+    fn attribute_selectors_keep_quotes_and_spaces() {
+        assert_eq!(
+            sp(r#"click [aria-label^="Click a light"]"#),
+            ["click", r#"[aria-label^="Click a light"]"#]
+        );
+        assert_eq!(
+            sp(r#"click button[name='a b'] --right"#),
+            ["click", "button[name='a b']", "--right"]
+        );
+        assert_eq!(
+            sp(r##"click a[href="#top"] >> [data-x="]"]"##),
+            ["click", r##"a[href="#top"]"##, ">>", r#"[data-x="]"]"#]
+        );
+    }
+
+    #[test]
+    fn shell_rules_still_apply_elsewhere() {
+        assert_eq!(
+            sp(r##"fill "#q" "hello world""##),
+            ["fill", "#q", "hello world"]
+        );
+        assert_eq!(sp("click #save # note"), ["click", "#save"]);
+        assert_eq!(
+            sp(r#"click '[aria-label="x y"]'"#),
+            ["click", r#"[aria-label="x y"]"#]
+        );
+        assert_eq!(
+            sp(r#"expect text "[draft]""#),
+            ["expect", "text", "[draft]"]
+        );
+    }
+
+    #[test]
+    fn points() {
+        assert_eq!(parse_point("458,341"), Some((458.0, 341.0)));
+        assert_eq!(parse_point("10.5, 2"), Some((10.5, 2.0)));
+        assert_eq!(parse_point("button:Save"), None);
+        assert_eq!(parse_point("#a,#b"), None);
     }
 }

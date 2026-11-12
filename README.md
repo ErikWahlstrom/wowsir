@@ -95,6 +95,14 @@ The release downloads include it too, as `skills/wowsir/SKILL.md`. For Claude Co
 
 Agents without a shell can use wowsir as an [MCP server](#as-an-mcp-server) instead.
 
+**Sandboxed shells:** the CLI talks to its background process over a local socket and starts Chrome, which agent sandboxes usually block. In Claude Code, let `wowsir` run outside the sandbox in `~/.claude/settings.json`:
+
+```json
+{ "sandbox": { "excludedCommands": ["wowsir *"] } }
+```
+
+Or use the MCP server, which runs outside the agent's shell sandbox.
+
 ## Usage
 
 ```
@@ -105,13 +113,13 @@ wowsir help
 |---|---|
 | Navigate | `open URL` `back` `forward` `reload` `url` `title` |
 | Layout | `watch T…` (each action then reports `! moved:` / `! jumped:` for those elements, sampled every frame) · `expect still [T…]` · `screenshot --mark` |
-| Mock | `mock /api/items 500` · `mock /api/items --json '{"items":[]}'` · `mock /api/x abort` · `mock /api/x --delay 3000` · `mock off` |
+| Mock | `mock /api/items 500` · `mock /api/items --json '{"items":[]}'` · `mock POST /api/x 200` (one method only) · `mock /api/x abort` · `mock /api/x --delay 3000` · `mock off` · `readonly on` (block all writes, see what they'd send with `net --request`) |
 | Tabs | `tabs` `tab N` `tab new [URL]` `tab close [N]` (popups and `target=_blank` pages are followed automatically) |
 | See | `snap [-i] [--grep X] [--in T] [--viewport] [--full] [--urls] [--ids] [--all]` `text [T]` `html [T]` `screenshot [PATH] [--full] [--el T]` |
-| Act | `click T [--ctrl\|--shift\|--mod]` `fill T TEXT` `type [T] TEXT` `press KEY…` `select T OPT…` `check T` `uncheck T` `hover T` `focus T` `upload T FILE…` `scroll [down\|up\|top\|bottom\|T]` `scroll T down\|up\|PX` (inside a scrollable element) |
+| Act | `click T [--ctrl\|--shift\|--mod]` `click --at X,Y` `tap T\|X,Y` `fill T TEXT` `type [T] TEXT` `press KEY…` `select T OPT…` `check T` `uncheck T` `hover T` `focus T` `upload T FILE…` `scroll [down\|up\|top\|bottom\|T]` `scroll T down\|up\|PX` (inside a scrollable element) |
 | Wait | `wait MS` `wait T` `wait text X` `wait gone T` `wait url X` `wait idle` |
 | Assert | `expect text\|no-text X` `expect url\|title X` `expect visible\|hidden T` `expect value T V` `expect checked\|unchecked\|mixed T` `expect count T N` `expect no-errors` |
-| Debug | `console [--errors]` `net [--failed] [--api] [--grep X]` `net --body PATTERN` `errors` `eval JS` `cookies [clear]` |
+| Debug | `console [--errors]` `net [--failed] [--api] [--grep X]` `net --body PATTERN` `net --request PATTERN` `errors` `eval JS` `cookies [clear]` |
 | Setup | `viewport W H [--mobile]` / `viewport mobile` (touch + mobile user agent) · `theme dark\|light\|off` · `block images fonts media css\|lite\|off` · `dialog accept [TEXT]\|dismiss` (TEXT answers `prompt()`) |
 | Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` |
 | Sessions | `-s NAME` / `WOWSIR_SESSION` · `sessions` · `close` · `stop` · `status` |
