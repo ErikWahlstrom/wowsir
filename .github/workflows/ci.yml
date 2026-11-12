@@ -1,8 +1,15 @@
 name: ci
+# PRs only: main is protected, so every change on it already passed these checks
+# in its PR. (macOS runners are scarce; running everything again after each merge
+# doubled the wait.) Releases build again from the tag.
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# a newer push to the same PR replaces its queued/running checks
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
