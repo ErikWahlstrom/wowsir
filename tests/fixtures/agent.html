@@ -11,6 +11,9 @@
   <button onclick="save()">Save</button>
   <button onclick="load()">Load</button>
   <button onclick="render(true)">Rerender</button>
+  <button onclick="wsSend()">Send live</button>
+  <button onclick="getDelete()">Delete via GET</button>
+  <button onclick="window.open('agent.html?autosave', 'pop', 'width=500,height=400')">Open editor</button>
   <p id="status">idle</p>
   <ul id="list"></ul>
 </div>
@@ -49,6 +52,17 @@
       st.textContent = 'save failed (' + e.message + ')';
     }
   }
+  function wsSend() {
+    try { new WebSocket('ws://' + location.host + '/live').send('{"light":5,"on":false}'); document.getElementById('status').textContent = 'sent live'; }
+    catch (e) { document.getElementById('status').textContent = 'live failed (' + e.name + ')'; }
+  }
+  async function getDelete() {
+    const st = document.getElementById('status');
+    try { const r = await fetch('api/lights/3/delete'); st.textContent = 'delete answered ' + r.status; }
+    catch (e) { st.textContent = 'delete failed (' + e.message + ')'; }
+  }
+  // the editor popup saves as soon as it loads
+  if (location.search.includes('autosave')) { document.title = 'Editor'; save(); }
   async function load() {
     const r = await fetch('api/items.json');
     const { items } = await r.json();

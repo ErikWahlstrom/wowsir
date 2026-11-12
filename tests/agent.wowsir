@@ -2,7 +2,7 @@
 open localhost:8765/agent.html
 # the list is rebuilt from scratch: refs taken before the re-render keep working
 click button:Rerender
-click @e6
+click @e9
 expect text "picked Click a light 3"
 # quotes and spaces inside an attribute selector survive line splitting (test files, MCP)
 click [aria-label^="Click a light 4"]
@@ -20,6 +20,17 @@ expect text "save failed"
 click button:Load
 expect text "loaded 2 items"
 net --request items.json
+# WebSocket messages and GETs that act are writes too
+click "button:Send live"
+net --request live
+click "button:Delete via GET"
+expect text "delete failed"
+# a popup that saves as it loads is read-only from its first request
+click "button:Open editor"
+expect title Editor
+expect text "save failed"
+tab close
+expect title Lights
 readonly off
 # a POST-only mock leaves the GET real
 mock POST /api/items.json --json '{"ok":true}'
@@ -28,4 +39,5 @@ expect text "save answered 200"
 click button:Load
 expect text "loaded 2 items"
 mock off
+# strict: an accidental write fails the step (the shell part of smoke.sh checks that)
 expect no-errors

@@ -113,7 +113,8 @@ wowsir help
 |---|---|
 | Navigate | `open URL` `back` `forward` `reload` `url` `title` |
 | Layout | `watch T…` (each action then reports `! moved:` / `! jumped:` for those elements, sampled every frame) · `expect still [T…]` · `screenshot --mark` |
-| Mock | `mock /api/items 500` · `mock /api/items --json '{"items":[]}'` · `mock POST /api/x 200` (one method only) · `mock /api/x abort` · `mock /api/x --delay 3000` · `mock off` · `readonly on` (block all writes, see what they'd send with `net --request`) |
+| Mock | `mock /api/items 500` · `mock /api/items --json '{"items":[]}'` · `mock POST /api/x 200` (one method only) · `mock /api/x abort` · `mock /api/x --delay 3000` · `mock off` |
+| Read-only | `readonly on\|strict\|off` · `readonly allow PATTERN` · `readonly` (status) — see [Read-only mode](#read-only-mode) |
 | Tabs | `tabs` `tab N` `tab new [URL]` `tab close [N]` (popups and `target=_blank` pages are followed automatically) |
 | See | `snap [-i] [--grep X] [--in T] [--viewport] [--full] [--urls] [--ids] [--all]` `text [T]` `html [T]` `screenshot [PATH] [--full] [--el T]` |
 | Act | `click T [--ctrl\|--shift\|--mod]` `click --at X,Y` `tap T\|X,Y` `fill T TEXT` `type [T] TEXT` `press KEY…` `select T OPT…` `check T` `uncheck T` `hover T` `focus T` `upload T FILE…` `scroll [down\|up\|top\|bottom\|T]` `scroll T down\|up\|PX` (inside a scrollable element) |
@@ -127,6 +128,30 @@ wowsir help
 **Targets:** `@e12` (snapshot ref) · `button:Sign in` (role:name, case-insensitive, exact before partial) · `text=Forgot password` · any CSS selector (pierces open and closed shadow DOM) · `A >> B` (B near A: inside it, or the first one after it in its section).
 
 **Global flags:** `-q` (no diff) · `--snap` (full snapshot instead of diff) · `--timeout MS` · `--headed`.
+
+### Read-only mode
+
+For looking at systems you must not change. `wowsir readonly on` blocks, for the tab, its frames and any popup or tab it opens (from their first request):
+
+- POST, PUT, PATCH and DELETE requests, including form posts and `sendBeacon`
+- outgoing WebSocket messages (incoming ones still arrive)
+- GETs whose path says `logout`, `logoff`, `signout`, `delete`, `remove` or `destroy` (a stray `/logout` would also end your saved login)
+- service workers are bypassed, so one can't send writes wowsir doesn't see
+
+Each block is reported in the action's output, the page sees an ordinary network failure, and `wowsir net --request PATTERN` shows the payload. `mock` rules answer first (`mock POST /api/save 200` fakes a save), and `readonly allow PATTERN` lets a read that's sent as POST through.
+
+`readonly strict` also fails the step that tried to write, so a test with `readonly strict` at the top catches accidental writes.
+
+**Sites that are always read-only:** list them in `~/.wowsir/readonly` (or `$WOWSIR_READONLY_FILE`). Every session that opens one starts read-only, including when a link or redirect leads there:
+
+```text
+# one site per line, subdomains included; * = every site except localhost
+staging.example.com
+prod.example.com lock          # lock: `readonly off` is refused
+ci.example.com strict          # strict: a blocked write fails the step
+```
+
+Read-only stops what leaves the browser. It can't stop changes made by other means (WebRTC, extensions), and it doesn't make a page behave as if the write succeeded.
 
 ### As an MCP server
 
