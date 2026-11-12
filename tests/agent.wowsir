@@ -1,0 +1,31 @@
+# agent feedback: stable refs, quoted attribute selectors, points, touch, read-only, method mocks
+open localhost:8765/agent.html
+# the list is rebuilt from scratch: refs taken before the re-render keep working
+click button:Rerender
+click @e6
+expect text "picked Click a light 3"
+# quotes and spaces inside an attribute selector survive line splitting (test files, MCP)
+click [aria-label^="Click a light 4"]
+expect text "picked Click a light 4"
+# map markers: no element to name, so click a viewport point
+click --at 466,149
+expect text "marker 2 clicked"
+expect no-text "by touch"
+tap 348,168
+expect text "marker 1 clicked by touch"
+# read-only: the save is refused, reads still work, and the payload is kept
+readonly on
+click button:Save
+expect text "save failed"
+click button:Load
+expect text "loaded 2 items"
+net --request items.json
+readonly off
+# a POST-only mock leaves the GET real
+mock POST /api/items.json --json '{"ok":true}'
+click button:Save
+expect text "save answered 200"
+click button:Load
+expect text "loaded 2 items"
+mock off
+expect no-errors

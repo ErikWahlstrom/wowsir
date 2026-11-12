@@ -18,21 +18,23 @@ const HELP: &str = r#"wowsir — fast headless browser for agents. Every action 
 NAVIGATE   open <url> · back · forward · reload · url · title
 LAYOUT     watch T... · watch (list) · watch off [T]   watched elements report `! moved:` / `! jumped:` after each action
            expect still [T...] · screenshot [PATH] --mark (outlines + coordinates of watched elements) · --mark=T
-MOCK       mock PATTERN STATUS|abort [--json X|--body X|--file F] [--delay MS] [--doc] · mock (list) · mock off [PATTERN]
-             PATTERN: URL substring or glob; page loads are only mocked with --doc
+MOCK       mock [METHOD] PATTERN STATUS|abort [--json X|--body X|--file F] [--delay MS] [--doc] · mock (list) · mock off [PATTERN]
+             PATTERN: URL substring or glob; METHOD: POST, PUT|DELETE... (default any); page loads only with --doc
+           readonly on|off   block every POST/PUT/PATCH/DELETE (look, don't touch a live system); `net --request` shows what was sent
 TABS       popups and target=_blank pages are followed automatically (! new tab N…)
            tabs · tab N · tab new [URL] · tab close [N]
 SEE        snap [-i] [--grep TEXT] [--in TARGET] [--viewport] [--full] [--urls] [--ids] [--all]
              -i interactive only · --grep filter lines · --in scope to element
            text [TARGET] · html [TARGET] · screenshot [PATH] [--full] [--el TARGET]
-ACT        click T [--double|--right] [--ctrl|--shift|--alt|--meta|--mod] · fill T TEXT · type [T] TEXT · press KEY... (Enter, Tab, Control+a, Mod+Enter)
+ACT        click T [--double|--right] [--ctrl|--shift|--alt|--meta|--mod] · click --at X,Y (viewport point: maps, canvas) · tap T|X,Y (touch)
+           fill T TEXT · type [T] TEXT · press KEY... (Enter, Tab, Control+a, Mod+Enter)
            select T OPTION... · check T · uncheck T · hover T · focus T · upload T FILE...
            scroll [down|up|top|bottom|T] [PX] · scroll T down|up|PX (inside a scrollable list/panel)
 WAIT       wait MS | wait T | wait text TEXT | wait gone T | wait url PART | wait idle
 ASSERT     expect text|no-text TEXT · expect url|title PART · expect visible|hidden T
            expect value T VALUE · expect checked|unchecked|mixed T · expect count T N · expect no-errors
            (assertions retry until --timeout, default 5000ms; exit code 1 on failure)
-DEBUG      console [--errors] [--all] · net [--failed] [--api] [--grep X] · net --body PATTERN [--full] · errors [--clear] · eval JS · eval --file F.js · eval - (stdin) · cookies [clear]
+DEBUG      console [--errors] [--all] · net [--failed] [--api] [--grep X] · net --body PATTERN [--full] · net --request PATTERN [--all] (what a request sent) · errors [--clear] · eval JS · eval --file F.js · eval - (stdin) · cookies [clear]
 SETUP      viewport W H [--mobile] | viewport mobile|tablet|desktop (mobile: touch + mobile user agent) · block images|fonts|media|css|lite|off
            theme dark|light [reduced-motion] | theme off   (prefers-color-scheme for CSS and matchMedia)
            dialog accept [TEXT]|dismiss (TEXT is typed into prompt())

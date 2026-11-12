@@ -7,7 +7,7 @@ description: Test and drive websites with the `wowsir` headless browser CLI. Use
 
 `wowsir` is a CLI. Each command is one shell call. The browser stays alive between calls.
 
-Run each `wowsir` command on its own, or chain them with `&&` / `;`. Don't pipe its output into other commands (`wowsir text | head`), redirect it (`> /dev/null`), or wrap it in `$(...)`. Those calls get sandboxed, and wowsir can't reach its daemon there. Use wowsir's own filters (`--grep`, `--max`, `--in`) instead.
+Run each `wowsir` command on its own, or chain them with `&&` / `;`. Don't pipe its output into other commands (`wowsir text | head`), redirect it (`> /dev/null`), or wrap it in `$(...)`. Those calls get sandboxed, and wowsir can't reach its daemon there. Use wowsir's own filters (`--grep`, `--max`, `--in`) instead. If even plain `wowsir` calls fail with socket or permission errors, the sandbox is blocking it: tell the user to add `"sandbox": { "excludedCommands": ["wowsir *"] }` to their Claude Code settings, or to use wowsir's MCP server.
 
 ## Login
 
@@ -75,7 +75,7 @@ Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by o
 
 ## Other
 
-- Debugging: `wowsir console --errors`, `wowsir net --failed`, `wowsir net --api`, `wowsir net --body /api/items` (response body of the latest matching request), `wowsir errors`, `wowsir eval "window.store.state"` (runs in the page's main world). For longer scripts, or to avoid quoting trouble, write the JavaScript to a file and run `wowsir eval --file check.js`. In `.wowsir` files and over MCP, `eval` takes the rest of the line verbatim, so quotes inside the JavaScript are kept.
+- Debugging: `wowsir console --errors`, `wowsir net --failed`, `wowsir net --api`, `wowsir net --body /api/items` (response body of the latest matching request), `wowsir net --request /api/save` (the body a request sent, including blocked and mocked ones), `wowsir errors`, `wowsir eval "window.store.state"` (runs in the page's main world). For longer scripts, or to avoid quoting trouble, write the JavaScript to a file and run `wowsir eval --file check.js`. In `.wowsir` files and over MCP, `eval` takes the rest of the line verbatim, so quotes inside the JavaScript are kept.
 - Screenshots: `wowsir screenshot` prints a path. Use it only for visual checks; text is cheaper.
 - Parallel or isolated runs: add `-s <name>` to every command. Each session has its own cookies and storage.
 - Iframes, including cross-origin ones (payment, sign-in widgets), show up in the snapshot under their `iframe … cross-origin` line; use their refs or role:name targets like any other. Errors from frames and workers end with `(in iframe host)` / `(in worker file.js)`.
@@ -84,9 +84,11 @@ Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by o
 - Scrollable lists and panels: `wowsir scroll 'list:Results' 600` (or `down`/`up`) scrolls inside the element; `wowsir scroll T` alone scrolls the page to it.
 - Tri-state checkboxes show `mixed`; `expect mixed T` asserts it, and `check`/`uncheck` click through mixed until they reach the state you asked for.
 - `prompt()` dialogs: `wowsir dialog accept 'some text'` before the click that opens them.
+- Things with no element to target (map markers, canvas, charts): `wowsir click --at 458,341` clicks a viewport point and says what it hit; `wowsir tap 458,341` (or `tap T`) sends a touch tap.
 - Multi-select: `wowsir click @e5 --mod` (Cmd on macOS, Ctrl elsewhere), `--shift`, `--ctrl`, `--alt`.
 - Long dropdowns: `wowsir snap --full` lists every option untruncated.
-- Error/empty/loading states without touching the backend: `wowsir mock /api/items 500`, `wowsir mock /api/items --json '{"items":[]}'`, `wowsir mock /api/items abort` (network failure), `wowsir mock /api/items --delay 3000` (the action returns while the request is held, so you see the loading state). The pattern is a URL substring or glob. `wowsir mock` lists mocks with hit counts, `wowsir mock off` clears them. Mocks apply from the next request, so click refresh or `wowsir reload`.
+- Error/empty/loading states without touching the backend: `wowsir mock /api/items 500`, `wowsir mock /api/items --json '{"items":[]}'`, `wowsir mock /api/items abort` (network failure), `wowsir mock /api/items --delay 3000` (the action returns while the request is held, so you see the loading state). The pattern is a URL substring or glob. `wowsir mock` lists mocks with hit counts, `wowsir mock off` clears them. Mocks apply from the next request, so click refresh or `wowsir reload`. Put a method first to mock only that: `wowsir mock POST /api/lights 200 --json '{}'` fakes the save while the GET that loads the page stays real.
+- Looking at a live or shared system: `wowsir readonly on` blocks every POST/PUT/PATCH/DELETE for the session (each block prints `! read-only: blocked POST /api/...`). Clicking Save is then safe, and `wowsir net --request /api/...` shows what it would have sent. A `mock` for the same request still answers first.
 - Tabs: when a click opens a popup or a `target=_blank` page, wowsir switches to it and prints `! new tab N opened`. When a popup closes itself (e.g. after a sign-in), wowsir goes back to the opener. `wowsir tabs` lists tabs, `wowsir tab N` switches, `wowsir tab close` closes the current one.
 - Speed up heavy pages: `wowsir block lite` (blocks images, fonts, and media).
 - Waiting: actions already wait for the page to settle. Use `wowsir wait text "Done"`, `wowsir wait gone ".spinner"`, or `--timeout 15000` for slow things.

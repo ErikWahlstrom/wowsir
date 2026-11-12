@@ -1,0 +1,57 @@
+<!doctype html>
+<title>Lights</title>
+<style>
+  body { margin: 0; font: 14px sans-serif; }
+  #map { position: absolute; left: 300px; top: 100px; width: 400px; height: 300px; background: #dde; }
+  .marker { position: absolute; width: 16px; height: 16px; border-radius: 8px; background: #c33; }
+  #side { position: absolute; left: 0; top: 0; width: 280px; }
+</style>
+<div id="side">
+  <h1>Lights</h1>
+  <button onclick="save()">Save</button>
+  <button onclick="load()">Load</button>
+  <button onclick="render(true)">Rerender</button>
+  <p id="status">idle</p>
+  <ul id="list"></ul>
+</div>
+<!-- a map: markers are bare divs with no role or name, like Leaflet's -->
+<div id="map"></div>
+<script>
+  let tick = 0;
+  function render(bump) {
+    if (bump) tick++;
+    // rebuilt from scratch every time, like a framework re-render
+    document.getElementById('list').innerHTML = Array.from({ length: 12 }, (_, i) =>
+      `<li><button aria-label="Click a light ${i + 1}">${i === 4 ? 'Light 5 · ' + tick : 'Light ' + (i + 1)}</button></li>`).join('');
+    document.querySelectorAll('#list button').forEach((b) =>
+      b.onclick = () => document.getElementById('status').textContent = 'picked ' + b.getAttribute('aria-label'));
+  }
+  render(false);
+  const map = document.getElementById('map');
+  [[40, 60], [158, 41], [300, 200]].forEach(([x, y], i) => {
+    const m = document.createElement('div');
+    m.className = 'marker';
+    m.style.left = x + 'px'; m.style.top = y + 'px';
+    let touched = false;
+    m.addEventListener('touchstart', () => { touched = true; }, { passive: true });
+    m.addEventListener('click', () => {
+      document.getElementById('status').textContent = 'marker ' + (i + 1) + ' clicked' + (touched ? ' by touch' : '');
+      touched = false;
+    });
+    map.appendChild(m);
+  });
+  async function save() {
+    const st = document.getElementById('status');
+    try {
+      const r = await fetch('api/items.json', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ light: 5, on: true }) });
+      st.textContent = 'save answered ' + r.status;
+    } catch (e) {
+      st.textContent = 'save failed (' + e.message + ')';
+    }
+  }
+  async function load() {
+    const r = await fetch('api/items.json');
+    const { items } = await r.json();
+    document.getElementById('status').textContent = 'loaded ' + items.length + ' items';
+  }
+</script>

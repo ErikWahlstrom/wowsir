@@ -27,12 +27,35 @@ K.closedCandidates = () => {
 let nextRef = 1;
 const refOf = new WeakMap(); // Element -> n
 const byRef = new Map(); // n -> WeakRef<Element>
-function ref(el) {
+// Stable refs across re-renders: a framework that rebuilds a list replaces its
+// elements, which would renumber every ref (noisy diffs, stale refs). A new element
+// with the same role, name and DOM path as one that has left the page takes over
+// that element's ref. An element still on the page never gives its ref away.
+const keyRef = new Map(); // "role|name|path" -> n
+function domPath(el) {
+  const parts = [];
+  for (let e = el; e && e.nodeType === 1 && e !== document.body; ) {
+    let i = 0;
+    for (let s = e.previousElementSibling; s; s = s.previousElementSibling) if (s.localName === e.localName) i++;
+    parts.push(e.localName + (i ? ':' + i : ''));
+    const p = e.parentNode;
+    e = p && p.nodeType === 11 ? p.host : p; // step out of shadow roots
+  }
+  return parts.reverse().join('/');
+}
+function ref(el, key) {
   let n = refOf.get(el);
-  if (!n) {
-    n = nextRef++;
-    refOf.set(el, n);
-    byRef.set(n, new WeakRef(el));
+  if (n) return n;
+  const k = key === undefined ? null : key + '|' + domPath(el);
+  const old = k && keyRef.get(k);
+  const prev = old && byRef.get(old);
+  const gone = prev && (!prev.deref() || !prev.deref().isConnected);
+  n = gone ? old : nextRef++;
+  refOf.set(el, n);
+  byRef.set(n, new WeakRef(el));
+  if (k) {
+    if (keyRef.size > 20000) keyRef.clear(); // long-lived pages: forget, don't grow forever
+    keyRef.set(k, n);
   }
   return n;
 }
@@ -400,7 +423,7 @@ function walkEl(n, out, inInter, noText, opts, vw, depth) {
   if (role && INTERACTIVE.has(role) && !hiddenSelf && !nativeOpt) {
     if (inViewport(n, vw)) {
       node.n = trunc(nameOf(n, role), opts.nameLen);
-      node.ref = ref(n);
+      node.ref = ref(n, role + '|' + node.n);
       node.a = attrsOf(n, role, opts);
       node.i = true;
       out.push(node); target = node.k;
@@ -701,6 +724,19 @@ function describe(el) {
   return r + (n ? ' ' + q(n) : '') + (rf ? ' @e' + rf : '');
 }
 K.describe = (t) => describe(resolve(t));
+// what a click at viewport point x,y lands on (through open/closed shadow roots)
+K.describeAt = (x, y) => {
+  if (x < 0 || y < 0 || x >= innerWidth || y >= innerHeight) throw new Error(`point ${x},${y} is outside the viewport (${innerWidth}x${innerHeight}); scroll first`);
+  let el = document.elementFromPoint(x, y);
+  for (let sr; el && (sr = rootOf(el)); ) {
+    const inner = sr.elementFromPoint(x, y);
+    if (!inner || inner === el) break;
+    el = inner;
+  }
+  if (!el) return 'nothing';
+  const c = el.getAttribute('class');
+  return describe(el) + (c && !refOf.get(el) ? ' .' + trunc(c.trim().split(/\s+/).join('.'), 50) : '');
+};
 
 // ---------------------------------------------------------------- selectors (for recording)
 function selectorFor(el) {
