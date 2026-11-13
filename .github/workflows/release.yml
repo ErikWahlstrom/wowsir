@@ -30,8 +30,9 @@ jobs:
       - if: steps.rp.outputs.pr
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+          PR: ${{ steps.rp.outputs.pr }}
+        # parse in the shell: a fromJSON() in env breaks the step whenever pr is empty
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
 
   # crates.io versions are permanent: refuse a release whose files disagree
   check:
