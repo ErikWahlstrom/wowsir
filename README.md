@@ -267,3 +267,7 @@ wowsir (CLI, sync, ~1ms) ──unix socket / named pipe──▶ wowsir daemon (
 ```sh
 ./tests/smoke.sh     # builds, serves tests/fixtures, runs tests/*.wowsir
 ```
+
+Pull requests are squash-merged, and the PR title becomes the commit message, so it follows [Conventional Commits](https://www.conventionalcommits.org/): `fix: …` for bug fixes, `feat: …` for new features, and `docs:`, `ci:`, `test:` or `chore:` for changes that don't need a release.
+
+Releases are automatic: after each merge, [release-please](https://github.com/googleapis/release-please) keeps a "release X.Y.Z" PR up to date with the version bump and `CHANGELOG.md`. A `fix:` gives a patch release and a `feat:` a minor one. Merging that PR tags the release; the release workflow then builds the binaries, attaches them to the GitHub release and publishes to crates.io.
