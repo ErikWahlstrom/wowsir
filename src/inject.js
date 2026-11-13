@@ -331,7 +331,7 @@ function attrsOf(el, role, opts) {
   if (role === 'option' && (aria('selected') === 'true' || el.selected)) a.push('selected');
   if (aria('pressed') === 'true') a.push('pressed');
   if (aria('current') && aria('current') !== 'false') a.push('current');
-  if (role === 'dialog' && (aria('modal') === 'true' || (t === 'dialog' && el.matches(':modal')))) a.push('modal');
+  if (role === 'dialog' && (aria('modal') === 'true' || (t === 'dialog' && el.matches(':modal')) || coversPage(el))) a.push('modal');
   if (opts.focused === el) a.push('focused');
   if (role === 'link' && opts.urls) {
     const h = el.getAttribute('href') || '';
@@ -347,6 +347,22 @@ function attrsOf(el, role, opts) {
 
 // ---------------------------------------------------------------- snapshot
 // Node: {r: role/line-kind, n: name, ref, a: attrs[], k: kids[], el}
+// a <dialog> without `open` that author CSS displays anyway
+function shownByCss(el) {
+  if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true })) return false;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+// fixed/absolute layer over most of the viewport: it blocks the page behind it
+function coversPage(el) {
+  const cs = getComputedStyle(el);
+  if (cs.position !== 'fixed' && cs.position !== 'absolute') return false;
+  const r = el.getBoundingClientRect();
+  const w = Math.min(r.right, innerWidth) - Math.max(r.left, 0);
+  const h = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+  return w > 0 && h > 0 && w * h >= 0.5 * innerWidth * innerHeight;
+}
+
 function inViewport(el, vw) {
   if (!vw) return true;
   let r = el.getBoundingClientRect();
@@ -411,8 +427,10 @@ function walkEl(n, out, inInter, noText, opts, vw, depth) {
     // visually-hidden native checkbox/radio styled through its label: keep it
     else if (!(isCheck && n.labels && n.labels.length && n.labels[0].checkVisibility())) return;
   }
-  // closed <dialog>s and faded-out, non-interactive layers (CSS modals/toasts) are not on screen
-  if (!contents && t === 'dialog' && !n.open) return;
+  // closed <dialog>s and faded-out, non-interactive layers (CSS modals/toasts) are not on screen.
+  // A natively closed <dialog> is display:none (caught above); one without `open` that is still
+  // laid out was shown by CSS (daisyUI's .modal-open and similar): treat it like any element.
+  if (!contents && t === 'dialog' && !n.open && !shownByCss(n)) return;
   if (!contents && !n.checkVisibility({ opacityProperty: true }) && getComputedStyle(n).pointerEvents === 'none') return;
   const hiddenSelf = !contents && !isCheck && !n.checkVisibility({ visibilityProperty: true });
   const role = inInter ? roleOf(n) : effectiveRole(n);

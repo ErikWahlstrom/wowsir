@@ -36,3 +36,12 @@ if "$K" -s lock readonly off >/dev/null; then fail "a locked site's read-only co
 "$K" -s lock -q click button:Save >/dev/null
 "$K" -s lock text '#status' | grep -q "save failed" || fail "write went through on a locked site"
 echo "✓ listed site opens read-only and stays locked"
+
+# outline checks (a .wowsir file can't assert on `snap` output)
+"$K" -s outline -q open localhost:$PORT/modal.html >/dev/null
+"$K" -s outline -q click button:Ask >/dev/null
+snap=$("$K" -s outline snap -i)
+echo "$snap" | grep -q 'dialog "Unknown Tool Requested" modal' || fail "CSS-shown <dialog> missing from the outline: $snap"
+echo "$snap" | grep -q 'button "Submit"' || fail "controls of a CSS-shown <dialog> missing: $snap"
+if echo "$snap" | grep -qE 'Native hidden|Faded hidden'; then fail "a hidden <dialog> is in the outline: $snap"; fi
+echo "✓ a <dialog> shown by CSS is in the outline, hidden ones are not"

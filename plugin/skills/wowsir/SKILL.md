@@ -110,3 +110,7 @@ Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by o
 - Speed up heavy pages: `wowsir block lite` (blocks images, fonts, and media).
 - Waiting: actions already wait for the page to settle. Use `wowsir wait text "Done"`, `wowsir wait gone ".spinner"`, or `--timeout 15000` for slow things.
 - Clean up with `wowsir close` (ends the session) or `wowsir stop` (stops the daemon and browser).
+
+## When wowsir itself gets it wrong
+
+If wowsir misbehaves (an element missing from the outline, a wrong diff, a crash, a confusing message), tell the user and offer to write a bug report for https://github.com/ErikWahlstrom/wowsir/issues. Include `wowsir --version`, the commands you ran, what you expected and what you got, and a small HTML snippet that reproduces it if you can. The repository is public: describe the site generically and leave out internal URLs, names, credentials and customer data.

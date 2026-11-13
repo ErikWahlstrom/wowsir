@@ -1,0 +1,31 @@
+<!doctype html>
+<title>Modals</title>
+<style>
+  /* like daisyUI: a <dialog> shown by a class, never by showModal() or [open] */
+  dialog.modal { display: none; }
+  dialog.modal.modal-open { display: grid; place-items: center; position: fixed; inset: 0; width: auto; height: auto;
+    max-width: none; max-height: none; margin: 0; border: 0; padding: 0; background: rgb(0 0 0 / .4); z-index: 999; }
+  dialog.modal .box { background: white; padding: 16px; }
+  /* faded out but still laid out: not on screen */
+  dialog.fade { display: grid; position: fixed; inset: 0; opacity: 0; pointer-events: none; }
+</style>
+<h1>Chat</h1>
+<input aria-label="Message">
+<button onclick="document.getElementById('ask').classList.add('modal-open')">Ask</button>
+<p id="answer"></p>
+<dialog id="ask" class="modal">
+  <div class="box">
+    <h3>Unknown Tool Requested</h3>
+    <input aria-label="Response">
+    <button onclick="answer()">Submit</button>
+    <button onclick="document.getElementById('ask').classList.remove('modal-open')">Cancel</button>
+  </div>
+</dialog>
+<dialog id="native"><button>Native hidden</button></dialog>
+<dialog class="fade"><button>Faded hidden</button></dialog>
+<script>
+  function answer() {
+    document.getElementById('answer').textContent = 'answered: ' + document.querySelector('[aria-label=Response]').value;
+    document.getElementById('ask').classList.remove('modal-open');
+  }
+</script>

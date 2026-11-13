@@ -1,0 +1,11 @@
+# a <dialog> shown by CSS (daisyUI .modal-open) without `open` is on screen and in the outline
+open localhost:8765/modal.html
+expect hidden "button:Native hidden"
+expect no-text "Unknown Tool Requested"
+click button:Ask
+expect text "Unknown Tool Requested"
+expect visible button:Submit
+fill textbox:Response "skip it"
+click button:Submit
+expect text "answered: skip it"
+expect hidden button:Submit
