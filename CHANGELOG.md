@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/ErikWahlstrom/wowsir/compare/v0.2.0...v0.2.1) (2026-11-13)
+
+
+### Bug Fixes
+
+* show &lt;dialog&gt;s opened by CSS (daisyUI .modal-open) in the outline ([#8](https://github.com/ErikWahlstrom/wowsir/issues/8)) ([77db2aa](https://github.com/ErikWahlstrom/wowsir/commit/77db2aa08ebdf4b93b5526735cb2908adab80a1f))
+
 ## [0.2.0](https://github.com/ErikWahlstrom/wowsir/releases/tag/v0.2.0) (2026-11-12)
 
 ### Features
