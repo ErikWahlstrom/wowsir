@@ -3,7 +3,8 @@ name: release
 # up to date (version in Cargo.toml, Cargo.lock and plugin.json, plus CHANGELOG.md),
 # deciding patch/minor from the conventional PR titles (fix: / feat:). Merging that
 # PR creates the tag and GitHub release; the jobs below then build, upload the
-# binaries and publish to crates.io.
+# binaries and publish to crates.io. The release PR's CI waits for a maintainer
+# to click "Approve workflows to run" (GitHub's rule for bot-opened PRs).
 on:
   push:
     branches: [main]
@@ -11,7 +12,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  actions: write # start CI for the release PR (see below)
 
 jobs:
   release-please:
@@ -25,14 +25,6 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-      # A PR opened by the workflow token starts no workflows, so its required checks
-      # would never run. A workflow_dispatch is allowed: run CI on the PR's branch.
-      - if: steps.rp.outputs.pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ steps.rp.outputs.pr }}
-        # parse in the shell: a fromJSON() in env breaks the step whenever pr is empty
-        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$(jq -r .headBranchName <<<"$PR")"
 
   # crates.io versions are permanent: refuse a release whose files disagree
   check:
