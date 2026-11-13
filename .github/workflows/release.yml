@@ -1,36 +1,72 @@
 name: release
+# After every merge to main, release-please keeps one "chore(main): release X.Y.Z" PR
+# up to date (version in Cargo.toml, Cargo.lock and plugin.json, plus CHANGELOG.md),
+# deciding patch/minor from the conventional PR titles (fix: / feat:). Merging that
+# PR creates the tag and GitHub release; the jobs below then build, upload the
+# binaries and publish to crates.io.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
 
 permissions:
   contents: write
+  pull-requests: write
+  actions: write # start CI for the release PR (see below)
 
 jobs:
-  # crates.io versions are permanent: refuse a tag that doesn't match Cargo.toml
-  check:
+  release-please:
     runs-on: ubuntu-latest
+    outputs:
+      created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      # A PR opened by the workflow token starts no workflows, so its required checks
+      # would never run. A workflow_dispatch is allowed: run CI on the PR's branch.
+      - if: steps.rp.outputs.pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ fromJSON(steps.rp.outputs.pr).headBranchName }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$BRANCH"
+
+  # crates.io versions are permanent: refuse a release whose files disagree
+  check:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - run: |
           v=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
-          [ "v$v" = "$GITHUB_REF_NAME" ] || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $v"; exit 1; }
+          [ "v$v" = "$TAG" ] || { echo "tag $TAG but Cargo.toml says $v"; exit 1; }
           p=$(jq -r .version plugin/.claude-plugin/plugin.json)
           [ "$p" = "$v" ] || { echo "plugin.json says $p but Cargo.toml says $v"; exit 1; }
 
   build:
-    needs: check
+    needs: [release-please, check]
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu }   # older glibc = runs on more distros
+          - { os: ubuntu-22.04, target: x86_64-unknown-linux-gnu } # older glibc = runs on more distros
           - { os: macos-latest, target: aarch64-apple-darwin }
           - { os: macos-latest, target: x86_64-apple-darwin }
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.release-please.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -38,7 +74,7 @@ jobs:
       - name: Package
         shell: bash
         run: |
-          name="wowsir-${GITHUB_REF_NAME}-${{ matrix.target }}"
+          name="wowsir-${TAG}-${{ matrix.target }}"
           mkdir "$name"
           exe=""; [ "$RUNNER_OS" = Windows ] && exe=".exe"
           cp "target/${{ matrix.target }}/release/wowsir$exe" README.md LICENSE "$name/"
@@ -51,22 +87,23 @@ jobs:
             wowsir-*.tar.gz
             wowsir-*.zip
 
-  release:
-    needs: build
+  # release-please already created the GitHub release (with the changelog): add the binaries
+  upload:
+    needs: [release-please, build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --generate-notes
+      - run: gh release upload "${{ needs.release-please.outputs.tag }}" dist/* --clobber --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
 
-  # Trusted Publishing: crates.io trusts this workflow in the crates-io environment
-  # (v* tags only), so no long-lived token is stored anywhere
+  # Trusted Publishing: crates.io trusts this workflow in the crates-io environment,
+  # so no long-lived token is stored anywhere
   publish:
-    needs: release
+    needs: [release-please, upload]
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
@@ -74,6 +111,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
