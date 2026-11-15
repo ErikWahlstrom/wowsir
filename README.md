@@ -122,7 +122,7 @@ wowsir help
 | Assert | `expect text\|no-text X` `expect url\|title X` `expect visible\|hidden T` `expect value T V` `expect checked\|unchecked\|mixed T` `expect count T N` `expect no-errors` |
 | Debug | `console [--errors]` `net [--failed] [--api] [--grep X]` `net --body PATTERN` `net --request PATTERN` `errors` `eval JS` `cookies [clear]` |
 | Setup | `viewport W H [--mobile]` / `viewport mobile` (touch + mobile user agent) · `theme dark\|light\|off` · `block images fonts media css\|lite\|off` · `dialog accept [TEXT]\|dismiss` (TEXT answers `prompt()`) |
-| Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` |
+| Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` · `record save FILE.spec.ts` · `export FILE.wowsir` · `locator T` |
 | Sessions | `-s NAME` / `WOWSIR_SESSION` · `sessions` · `close` · `stop` · `status` |
 
 **Targets:** `@e12` (snapshot ref) · `button:Sign in` (role:name, case-insensitive, exact before partial) · `text=Forgot password` · any CSS selector (pierces open and closed shadow DOM) · `A >> B` (B near A: inside it, or the first one after it in its section). A target that matches several elements acts on the first and prints a `!` line naming the others, with a target for each (`'text=Walk dog >> button:Delete'`); in `wowsir run FILE` that fails the step.
@@ -224,6 +224,19 @@ GitHub's Ubuntu and macOS runners come with Google Chrome, which wowsir finds by
 ```
 
 Start your app first and point the tests at it (`open localhost:3000/...`). This repo's own workflow is in [.github/workflows/ci.yml](.github/workflows/ci.yml).
+
+### As Playwright tests
+
+Explore with wowsir, keep the test in Playwright: `wowsir record save tests/checkout.spec.ts` saves the recording as a Playwright test, and `wowsir export tests/checkout.wowsir` converts an existing file (`-o -` prints it). Targets become Playwright locators (`button:Sign in` → `getByRole('button', { name: 'Sign in', exact: true })`, `[data-testid=x]` → `getByTestId('x')`), and assertions become `expect(…)` calls with the same timeouts. `wowsir locator T` shows both forms for one element:
+
+```
+$ wowsir locator @e2
+button "Delete" @e2
+wowsir      'text=Walk dog >> button:Delete'
+playwright  page.locator('*', { has: page.getByText('Walk dog') })…
+```
+
+What doesn't carry over is marked with a comment: Playwright needs `frameLocator()` for elements in iframes, can't reach closed shadow DOM, doesn't follow new tabs on its own, and has no layout watching.
 
 ## Benchmark
 

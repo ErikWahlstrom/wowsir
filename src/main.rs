@@ -6,6 +6,7 @@ mod keys;
 mod login;
 mod mcp;
 mod platform;
+mod playwright;
 mod readonly;
 mod session;
 
@@ -48,6 +49,8 @@ AUTH       login URL               opens a visible window; a human signs in; coo
            state save FILE · state load FILE   (Playwright-compatible storageState)
 TESTS      run FILE...|- [--parallel N]   (one command per line, # comments; stops at first failure)
            record [show|save FILE|clear]   (your session as a replayable test, refs → stable selectors)
+           record save FILE.spec.ts · export FILE.wowsir [-o OUT]   (as a Playwright test)
+           locator T               a stable target for T (refs are per page load) and its Playwright locator
 SESSIONS   -s NAME / WOWSIR_SESSION=NAME (isolated cookies/storage; parallel-safe) · sessions · close · stop · status
 
 TARGETS (T)  @e12               ref from a snapshot (stable while the element lives)
@@ -237,6 +240,48 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+        }
+        "export" => {
+            // export FILE.wowsir [-o OUT]: a Playwright test, no browser needed
+            let mut files = vec![];
+            let mut out: Option<String> = None;
+            let mut it = argv[1..].iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "-o" | "--out" => out = it.next().cloned(),
+                    "--playwright" => {}
+                    f => files.push(f.to_string()),
+                }
+            }
+            let [src] = files.as_slice() else {
+                eprintln!("usage: wowsir export FILE.wowsir [-o FILE.spec.ts]   (a Playwright test; `-o -` prints it)");
+                std::process::exit(2);
+            };
+            let text = std::fs::read_to_string(src).unwrap_or_else(|e| {
+                eprintln!("FAIL cannot read {src}: {e}");
+                std::process::exit(2);
+            });
+            let path = std::path::Path::new(src);
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("test");
+            let from = path.file_name().and_then(|s| s.to_str()).unwrap_or(src);
+            match playwright::spec(&text, stem, from) {
+                Ok(spec) if out.as_deref() == Some("-") => print!("{spec}"),
+                Ok(spec) => {
+                    let dest = out
+                        .map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| path.with_file_name(format!("{stem}.spec.ts")));
+                    if let Err(e) = std::fs::write(&dest, spec) {
+                        eprintln!("FAIL cannot write {}: {e}", dest.display());
+                        std::process::exit(1);
+                    }
+                    println!("wrote {} (Playwright test)", dest.display());
+                }
+                Err(e) => {
+                    eprintln!("FAIL {e}");
+                    std::process::exit(1);
+                }
+            }
+            std::process::exit(0);
         }
         "eval" | "js" if matches!(argv.get(1).map(|s| s.as_str()), Some("-" | "--file" | "-f")) => {
             let code = if argv[1] == "-" {
