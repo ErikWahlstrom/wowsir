@@ -65,6 +65,7 @@ Quote CSS selectors that start with `#` on the command line (`wowsir text '#tota
 `@e12` · `button:Sign in` · `textbox:Email` · `link:Pricing` · `h1:Welcome` · `text=Forgot password` · CSS (`#id`, `[data-testid=x]`).
 Chain with ` >> ` to pick an element near another one: `"h2:Shipping >> checkbox:Gift wrap"` takes the first match after that heading in its section, and `"text=You have unsaved changes >> button:Discard"` finds the Discard next to that message. `snap --in <heading>` and `text <heading>` cover the heading's whole section.
 A ref stays valid while its element exists. If you get "stale ref", run `wowsir snap`.
+If a target matches several elements (a Delete button on every row), wowsir acts on the first and says so: `! 2 elements match button:Delete: used @e4 (in "Buy milk"); also @e7 (in "Walk dog") → 'text=Walk dog >> button:Delete'`. When you see that line, check it was the one you meant; if not, use the suggested target or the ref. Inside `wowsir run FILE` an ambiguous target fails the step, so a test always says which element it means.
 
 ## Layout stability
 

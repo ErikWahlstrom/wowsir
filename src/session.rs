@@ -708,6 +708,8 @@ pub struct Session {
     pub moves: Vec<(String, String)>,
     /// page the current recording started on (for `record save` without an `open`)
     pub record_url: String,
+    /// the last action's target matched several elements (what it used, what else matched)
+    pub ambiguous: Option<String>,
     /// modifier bits held during the next mouse click (Alt=1 Ctrl=2 Meta=4 Shift=8)
     pub click_mods: i64,
     /// saved-login expiry warnings, shown once the agent is on that site: (site, message)
@@ -817,6 +819,7 @@ impl Session {
             last_writeback: Instant::now(),
             click_mods: 0,
             record_url: String::new(),
+            ambiguous: None,
             watches: vec![],
             moves: vec![],
             expiry_notes: vec![],

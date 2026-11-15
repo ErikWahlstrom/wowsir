@@ -125,7 +125,7 @@ wowsir help
 | Tests | `run FILE...\|- [--parallel N]` · `record show\|save FILE\|clear` |
 | Sessions | `-s NAME` / `WOWSIR_SESSION` · `sessions` · `close` · `stop` · `status` |
 
-**Targets:** `@e12` (snapshot ref) · `button:Sign in` (role:name, case-insensitive, exact before partial) · `text=Forgot password` · any CSS selector (pierces open and closed shadow DOM) · `A >> B` (B near A: inside it, or the first one after it in its section).
+**Targets:** `@e12` (snapshot ref) · `button:Sign in` (role:name, case-insensitive, exact before partial) · `text=Forgot password` · any CSS selector (pierces open and closed shadow DOM) · `A >> B` (B near A: inside it, or the first one after it in its section). A target that matches several elements acts on the first and prints a `!` line naming the others, with a target for each (`'text=Walk dog >> button:Delete'`); in `wowsir run FILE` that fails the step.
 
 **Global flags:** `-q` (no diff) · `--snap` (full snapshot instead of diff) · `--timeout MS` · `--headed`.
 

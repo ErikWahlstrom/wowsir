@@ -57,6 +57,7 @@ TARGETS (T)  @e12               ref from a snapshot (stable while the element li
                                 quote '#id' in the shell: unquoted, # starts a shell comment
              A >> B             B near A: inside it, else the first after it in its section
                                 ("h2:Shipping >> checkbox:Gift wrap", "text=Unsaved >> button:Discard")
+             several matches → the first is used, with a `!` line naming the others (in `run FILE`: the step fails)
 
 MCP        wowsir mcp   (stdio MCP server: tools `browser` + `browser_run`, same commands and output as this CLI)
            add to Claude Code: claude mcp add --scope user wowsir -- wowsir mcp
@@ -282,6 +283,8 @@ fn main() {
                 Ok(steps) => {
                     req.cmd = vec!["run".into()];
                     req.batch = Some(steps);
+                    // a test file (not steps piped in by an agent): ambiguous targets fail
+                    req.strict_targets = src != "-";
                 }
                 Err(e) => {
                     eprintln!("FAIL {e}");
@@ -384,6 +387,7 @@ fn run_files(base: &Req, files: &[String], jobs: usize) -> i32 {
                         req.session = session.clone();
                         req.cmd = vec!["run".into()];
                         req.batch = Some(steps);
+                        req.strict_targets = true;
                         let r = match send(&req, true) {
                             Ok(resp) => (resp.code == 0, resp.out),
                             Err(e) => (false, format!("FAIL {e}")),

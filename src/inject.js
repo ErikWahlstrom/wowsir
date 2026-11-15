@@ -615,6 +615,7 @@ function byRole(role, name, all) {
     const nm = norm(nameOf(el, r)).toLowerCase();
     if (nm === want) exact.push(el); else if (nm.includes(want)) partial.push(el);
   }
+  if (all === 'tiers') return [exact, partial];
   return all ? exact.concat(partial) : exact[0] || partial[0] || null;
 }
 
@@ -650,6 +651,7 @@ function byText(s, all) {
   }
   // prefer the deepest match (most specific)
   const pick = (list) => list.filter((e) => !list.some((o) => o !== e && composedContains(e, o)));
+  if (all === 'tiers') return [pick(exact), pick(partial)];
   const res = pick(exact).concat(pick(partial));
   return all ? res : res[0] || null;
 }
@@ -756,8 +758,55 @@ K.describeAt = (x, y) => {
   return describe(el) + (c && !refOf.get(el) ? ' .' + trunc(c.trim().split(/\s+/).join('.'), 50) : '');
 };
 
+// ---------------------------------------------------------------- ambiguous targets
+// Every element a target could mean, in the same tier as the one it resolves to
+// (an exact name match isn't ambiguous with longer names that merely contain it).
+function rivalsOf(t, el) {
+  if (typeof t !== 'string' || /\s>>\s/.test(t)) return [];
+  const p = parseTarget(t);
+  let list = [];
+  if (p.kind === 'role') list = byRole(p.role, p.v, 'tiers').find((l) => l.includes(el)) || [];
+  else if (p.kind === 'text') {
+    const tier = byText(p.v, 'tiers').find((l) => l.some((e) => closestInteractive(e) === el)) || [];
+    list = [...new Set(tier.map(closestInteractive))];
+  } else if (p.kind === 'css') { try { list = deepQuery(p.v, true).filter(visible); } catch (e) {} }
+  return list.length > 1 ? list : [];
+}
+// The largest ancestor of el that holds none of the others: the row/card/item it lives in.
+function ownBox(el, others) {
+  let box = null;
+  for (let a = parentOf(el); a && a.nodeType === 1 && a !== document.body && !others.some((o) => o !== el && composedContains(a, o)); a = parentOf(a)) box = a;
+  return box;
+}
+// A short text in el's own box, outside el: what tells it apart from its twins.
+function anchorText(el, others) {
+  const box = ownBox(el, others);
+  if (!box) return null;
+  const mine = textOf(el);
+  const walker = document.createTreeWalker(box, NodeFilter.SHOW_TEXT);
+  for (let n; (n = walker.nextNode()); ) {
+    if (composedContains(el, n.parentElement) || SKIP.has(n.parentElement.localName) || !n.parentElement.checkVisibility()) continue;
+    const s = norm(n.data);
+    if (s.length >= 2 && s.length <= 60 && s !== mine && /[\p{L}\p{N}]/u.test(s)) return s;
+  }
+  return null;
+}
+function ambiguity(t, el) {
+  if (!el || typeof t !== 'string' || /^@?e\d+$/.test(t.trim())) return undefined;
+  const list = rivalsOf(t, el);
+  if (!list.length) return undefined;
+  for (const e of list) ref(e);
+  const where = (e) => { const a = anchorText(e, list); return a ? ` (in ${q(trunc(a, 40))})` : ''; };
+  const shown = list.filter((e) => e !== el).slice(0, 3).map((e) => {
+    const s = selectorFor(e, list);
+    return '@e' + refOf.get(e) + where(e) + (/^[a-z]+:|^text=|^\[data-/.test(s) || s.includes(' >> ') ? ` → '${s}'` : '');
+  });
+  const more = list.length - 1 - shown.length;
+  return `${list.length} elements match ${t}: used @e${refOf.get(el)}${where(el)}; also ${shown.join(', ')}${more > 0 ? ` and ${more} more` : ''}`;
+}
+
 // ---------------------------------------------------------------- selectors (for recording)
-function selectorFor(el) {
+function selectorFor(el, twins) {
   for (const a of ['data-testid', 'data-test', 'data-test-id', 'data-cy', 'data-qa']) {
     const v = el.getAttribute(a);
     if (v) return `[${a}=${q(v)}]`;
@@ -768,6 +817,12 @@ function selectorFor(el) {
     if (n && n.length <= 80) {
       const matches = byRole(r, n, true).filter((e) => norm(nameOf(e, r)).toLowerCase() === norm(n).toLowerCase());
       if (matches.length === 1 && matches[0] === el) return `${r}:${n}`;
+      // twins (a Delete button per row): anchor on text from its own row/card
+      const a = anchorText(el, twins || matches);
+      if (a && matches.length > 1) {
+        const s = `text=${a} >> ${r}:${n}`;
+        try { if (resolve(s) === el) return s; } catch (e) {}
+      }
     }
   }
   if (el.id && /^[A-Za-z][\w-]*$/.test(el.id) && el.ownerDocument.querySelectorAll('#' + el.id).length === 1) return '#' + el.id;
@@ -835,7 +890,9 @@ K.point = async (t, sel) => {
     return { retry: `${describe(el)} is covered by ${describe(hit)}` };
   }
   const [ox, oy] = frameOffset(target);
-  return { x: lx + ox, y: ly + oy, desc: describe(el), sel: sel ? selectorFor(el) : undefined };
+  const amb = ambiguity(t, el);
+  // an ambiguous target is recorded as the element it actually hit
+  return { x: lx + ox, y: ly + oy, desc: describe(el), sel: sel || amb ? selectorFor(el) : undefined, amb };
 };
 
 const TEXTLIKE = new Set(['text', 'search', 'email', 'password', 'tel', 'url', 'number', '']);
@@ -847,11 +904,12 @@ K.prepFill = (t, sel) => {
   if (!visible(el)) return { retry: describe(el) + ' is not visible' };
   if (el.disabled) return { retry: describe(el) + ' is disabled' };
   if (el.readOnly) throw new Error(describe(el) + ' is readonly');
-  const s = sel ? selectorFor(el) : undefined;
+  const amb = ambiguity(t, el);
+  const s = sel || amb ? selectorFor(el) : undefined;
   if (tag === 'select') throw new Error(describe(el) + ' is a <select>; use `wowsir select ' + t + ' <option>`');
   if (tag === 'input' && !TEXTLIKE.has(el.type)) {
     if (['checkbox', 'radio'].includes(el.type)) throw new Error(describe(el) + ' is a ' + el.type + '; use `wowsir check`');
-    return { direct: true, desc: describe(el), sel: s }; // date, time, color, range...
+    return { direct: true, desc: describe(el), sel: s, amb }; // date, time, color, range...
   }
   if (tag !== 'input' && tag !== 'textarea' && !el.isContentEditable) {
     // maybe a wrapper around an input
@@ -864,7 +922,7 @@ K.prepFill = (t, sel) => {
     const range = document.createRange(); range.selectNodeContents(el);
     const s2 = getSelection(); s2.removeAllRanges(); s2.addRange(range);
   } else el.select();
-  return { desc: describe(el), sel: s, empty: !(el.value || el.innerText || '').length };
+  return { desc: describe(el), sel: s, empty: !(el.value || el.innerText || '').length, amb };
 };
 
 function setNative(el, v) {
@@ -878,6 +936,7 @@ K.setValue = (t, v) => { const el = resolve(t); setNative(el, v); return el.valu
 K.select = (t, values, sel) => {
   let el;
   try { el = resolve(t); } catch (e) { if (e.retry) return { retry: e.message }; throw e; }
+  const amb = ambiguity(t, el);
   if (el.localName !== 'select') {
     const inner = el.querySelector && el.querySelector('select');
     if (!inner) throw new Error(describe(el) + ' is not a <select>. For custom dropdowns: click it, then click the option.');
@@ -892,11 +951,11 @@ K.select = (t, values, sel) => {
     if (!o) throw new Error(`option "${v}" not found in ${describe(el)}. Options: ${opts.map((o) => norm(o.label)).slice(0, 20).join(', ')}`);
     picked.push(o);
   }
-  const s = sel ? selectorFor(el) : undefined;
+  const s = sel || amb ? selectorFor(el) : undefined;
   for (const o of opts) o.selected = picked.includes(o);
   el.dispatchEvent(new Event('input', { bubbles: true, composed: true }));
   el.dispatchEvent(new Event('change', { bubbles: true }));
-  return { desc: describe(el), picked: picked.map((o) => norm(o.label)), sel: s };
+  return { desc: describe(el), picked: picked.map((o) => norm(o.label)), sel: s, amb };
 };
 
 // true | false | 'mixed' (tri-state checkboxes)
