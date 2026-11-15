@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.3.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.2.1...v0.3.0) (2026-11-15)
+
+
+### Features
+
+* `locator T` prints a stable target for an element and its Playwright locator ([e291843](https://github.com/ErikWahlstrom/wowsir/commit/e291843940bf368c696c75597edae04b56770009))
+* export tests and recordings as Playwright tests ([#14](https://github.com/ErikWahlstrom/wowsir/issues/14)) ([e291843](https://github.com/ErikWahlstrom/wowsir/commit/e291843940bf368c696c75597edae04b56770009))
+* warn when a target matches several elements ([#13](https://github.com/ErikWahlstrom/wowsir/issues/13)) ([8c6a154](https://github.com/ErikWahlstrom/wowsir/commit/8c6a154252d3e28ff9bf9b8a513ef9d2d085708d))
+
 ## [0.2.1](https://github.com/ErikWahlstrom/wowsir/compare/v0.2.0...v0.2.1) (2026-11-13)
 
 
