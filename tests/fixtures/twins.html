@@ -1,0 +1,15 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Twins</title></head>
+<body>
+<h1>Groceries</h1>
+<ul>
+  <li><span>Buy milk</span> <button>Delete</button></li>
+  <li><span>Walk dog</span> <button>Delete</button></li>
+  <li><span>Feed cat</span> <button>Delete all</button></li>
+</ul>
+<p id="out"></p>
+<script>
+  for (const b of document.querySelectorAll('li button'))
+    b.onclick = () => { document.getElementById('out').textContent = 'deleted ' + b.parentElement.querySelector('span').textContent; };
+</script>
+</body></html>

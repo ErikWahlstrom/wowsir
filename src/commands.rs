@@ -39,6 +39,9 @@ pub struct Ctx {
     /// Always print a full snapshot after an action instead of a diff.
     pub full_after: bool,
     pub timeout: Option<Duration>,
+    /// Inside `run`: a target that matches several elements fails the step
+    /// (a test must say which one it means) instead of only warning.
+    pub strict_targets: bool,
 }
 
 // ----------------------------------------------------------------- arg parsing
@@ -412,7 +415,19 @@ impl Session {
             } else {
                 None
             };
+        self.ambiguous = None;
         let r = self.dispatch(cmd, &args, ctx, &mut rec).await;
+        let mut amb = self.ambiguous.take();
+        let r = match (r, &amb) {
+            // a test that depends on "whichever matches first" breaks silently when the page changes
+            (Ok(_), Some(m)) if ctx.strict_targets => Err(anyhow!(
+                "{m}. A test must name one element: use a more specific target"
+            )),
+            (r, _) => r,
+        };
+        if r.is_err() {
+            amb = None;
+        }
         let out = match r {
             Ok(head) => {
                 if RECORDED.contains(&cmd.as_str()) {
@@ -465,6 +480,15 @@ impl Session {
                 }
                 Out::fail(t)
             }
+        };
+        // right under the headline: the agent must see it acted on a guess
+        let out = match amb {
+            Some(m) if out.ok => {
+                let (head, rest) = out.text.split_once('\n').unwrap_or((&out.text, ""));
+                let sep = if rest.is_empty() { "" } else { "\n" };
+                Out::ok(format!("{head}\n! {m}{sep}{rest}"))
+            }
+            _ => out,
         };
         self.share_readonly();
         // strict read-only: a step that tried to write fails, so a test catches it
@@ -934,6 +958,13 @@ impl Session {
             .unwrap_or(self.timeout)
     }
 
+    /// Remember an action result's `amb` (its target matched several elements).
+    fn note_amb(&mut self, v: &Value) {
+        if self.ambiguous.is_none() {
+            self.ambiguous = v["amb"].as_str().map(String::from);
+        }
+    }
+
     /// Poll a `__wowsir.<f>` action until it stops returning {retry}.
     async fn actionable(&mut self, f: &str, args: &[Value], timeout: Duration) -> Result<Value> {
         let start = Instant::now();
@@ -963,6 +994,7 @@ impl Session {
         let mut v = self
             .actionable("point", &[json!(target), json!(Self::is_ref(target))], to)
             .await?;
+        self.note_amb(&v);
         let (mut x, mut y) = (
             v["x"].as_f64().unwrap_or(0.0),
             v["y"].as_f64().unwrap_or(0.0),
@@ -1240,6 +1272,7 @@ impl Session {
                 let v = self
                     .actionable("point", &[json!(target), json!(Self::is_ref(target))], to)
                     .await?;
+                self.note_amb(&v);
                 self.tap(
                     v["x"].as_f64().unwrap_or(0.0),
                     v["y"].as_f64().unwrap_or(0.0),
@@ -1306,6 +1339,7 @@ impl Session {
                 let v = self
                     .actionable("point", &[json!(target), json!(Self::is_ref(target))], to)
                     .await?;
+                self.note_amb(&v);
                 self.mouse(
                     "mouseMoved",
                     v["x"].as_f64().unwrap_or(0.0),
@@ -1329,6 +1363,7 @@ impl Session {
                         to,
                     )
                     .await?;
+                self.note_amb(&v);
                 if v["direct"].as_bool() == Some(true) {
                     self.k("setValue", &[json!(target), json!(text)]).await?;
                 } else if text.is_empty() {
@@ -1392,6 +1427,7 @@ impl Session {
                         to,
                     )
                     .await?;
+                self.note_amb(&v);
                 if let Some(sel) = v["sel"].as_str() {
                     let mut r = vec!["select".to_string(), sel.to_string()];
                     r.extend(values.iter().cloned());

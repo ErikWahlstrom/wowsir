@@ -1,0 +1,7 @@
+# several elements with the same role and name: pick one by what's next to it
+open localhost:8765/twins.html
+click 'text=Walk dog >> button:Delete'
+expect text "deleted Walk dog"
+# "Delete all" only contains the name: not a twin of the Delete buttons
+click 'button:Delete all'
+expect text "deleted Feed cat"

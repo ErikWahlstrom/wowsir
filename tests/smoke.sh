@@ -45,3 +45,12 @@ echo "$snap" | grep -q 'dialog "Unknown Tool Requested" modal' || fail "CSS-show
 echo "$snap" | grep -q 'button "Submit"' || fail "controls of a CSS-shown <dialog> missing: $snap"
 if echo "$snap" | grep -qE 'Native hidden|Faded hidden'; then fail "a hidden <dialog> is in the outline: $snap"; fi
 echo "✓ a <dialog> shown by CSS is in the outline, hidden ones are not"
+
+# ambiguous targets: a warning that names the twins, a failure inside a test file
+"$K" -s twins -q open localhost:$PORT/twins.html >/dev/null
+out=$("$K" -s twins click button:Delete) || fail "ambiguous click failed outside a test: $out"
+echo "$out" | grep -q "2 elements match button:Delete: used @e[0-9]* (in \"Buy milk\"); also @e[0-9]* (in \"Walk dog\") → 'text=Walk dog >> button:Delete'" || fail "no ambiguity warning: $out"
+"$K" -s twins record show | grep -q "click 'text=Buy milk >> button:Delete'" || fail "ambiguous click not recorded as the element it hit"
+printf 'open localhost:%s/twins.html\nclick button:Delete\n' $PORT > "$WOWSIR_HOME/ambiguous.wowsir"
+if "$K" -s amb run "$WOWSIR_HOME/ambiguous.wowsir" >/dev/null; then fail "a test with an ambiguous target passed"; fi
+echo "✓ ambiguous targets warn, and fail inside a test file"

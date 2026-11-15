@@ -43,6 +43,9 @@ pub struct Req {
     /// don't load saved logins into a newly created session
     #[serde(default)]
     pub no_auth: bool,
+    /// `run FILE`: a test, where a target matching several elements fails the step
+    #[serde(default)]
+    pub strict_targets: bool,
     /// the client's build_id(): a daemon started from another build says so
     #[serde(default)]
     pub build: String,
@@ -405,6 +408,7 @@ impl Daemon {
             quiet: req.quiet,
             full_after: req.full_after,
             timeout: req.timeout.map(Duration::from_millis),
+            strict_targets: req.strict_targets,
         };
         if let Some(batch) = req.batch {
             return run_batch(&mut s, batch, ctx).await;
@@ -427,6 +431,7 @@ async fn run_batch(s: &mut Session, steps: Vec<(usize, Vec<String>)>, ctx: Ctx) 
         quiet: true,
         full_after: false,
         timeout: ctx.timeout,
+        strict_targets: ctx.strict_targets,
     };
     for (i, (lineno, step)) in steps.iter().enumerate() {
         let last = i == total - 1;
