@@ -171,10 +171,10 @@ pub fn parse_args(raw: &[String]) -> Args {
 }
 
 impl Args {
-    fn has(&self, names: &[&str]) -> bool {
+    pub fn has(&self, names: &[&str]) -> bool {
         names.iter().any(|n| self.flags.contains_key(*n))
     }
-    fn get(&self, names: &[&str]) -> Option<&str> {
+    pub fn get(&self, names: &[&str]) -> Option<&str> {
         names
             .iter()
             .find_map(|n| self.flags.get(*n).map(|s| s.as_str()))
@@ -193,7 +193,7 @@ fn ms(t: Instant) -> u128 {
     t.elapsed().as_millis()
 }
 
-fn normalize_url(u: &str) -> String {
+pub fn normalize_url(u: &str) -> String {
     if u.contains("://")
         || u.starts_with("about:")
         || u.starts_with("data:")
@@ -2367,6 +2367,25 @@ impl Session {
                     o => bail!("state save|load FILE (got {o})"),
                 }
             }
+            "locator" | "selector" => {
+                // a stable target for an element (refs are per page load), and the Playwright locator for it
+                let t = a.pos.join(" ");
+                if t.is_empty() {
+                    bail!("usage: locator <target>, e.g. `wowsir locator @e12`");
+                }
+                let v = self.k("selectorInfo", &[json!(t)]).await?;
+                let sel = v["sel"].as_str().unwrap_or(&t).to_string();
+                let mut out = format!(
+                    "{}\nwowsir      {}\nplaywright  {}",
+                    v["desc"].as_str().unwrap_or(&t),
+                    shell_words::quote(&sel),
+                    crate::playwright::locator(&sel, false)
+                );
+                if let Some(m) = v["amb"].as_str() {
+                    out.push_str(&format!("\n! {m}"));
+                }
+                Ok(out)
+            }
             "url" => Ok(self.url()),
             "title" => Ok(self
                 .js("document.title")
@@ -2412,10 +2431,32 @@ impl Session {
                             f,
                             steps.join("\n")
                         );
+                        // x.spec.ts / x.test.js / --playwright: a Playwright test instead
+                        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+                        let pw = a.has(&["playwright"]) || matches!(ext, "ts" | "js" | "mjs");
+                        let body = if pw {
+                            let stem = p
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or("recorded")
+                                .split('.')
+                                .next()
+                                .unwrap_or("recorded")
+                                .to_string();
+                            crate::playwright::spec(&body, &stem, "a wowsir recording")
+                                .map_err(|e| anyhow!(e))?
+                        } else {
+                            body
+                        };
                         std::fs::write(&p, body)?;
-                        Ok(format!("saved {} steps to {}", steps.len(), p.display()))
+                        Ok(format!(
+                            "saved {} steps to {}{}",
+                            steps.len(),
+                            p.display(),
+                            if pw { " (Playwright test)" } else { "" }
+                        ))
                     }
-                    o => bail!("record show|save <file>|clear (got {o})"),
+                    o => bail!("record show|save <file>[.spec.ts]|clear (got {o})"),
                 }
             }
             _ => bail!("unknown command '{cmd}'. Run `wowsir help`."),

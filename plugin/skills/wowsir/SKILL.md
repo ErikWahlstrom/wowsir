@@ -90,6 +90,10 @@ wowsir run tests/checkout.wowsir            # deterministic replay, no LLM
 
 Run a whole suite with `wowsir run tests/*.wowsir --parallel 4`: each file gets its own fresh session.
 
+Need a stable target to write into a test yourself? `wowsir locator @e12` prints one (`'text=Walk dog >> button:Delete'` for a button repeated on every row) plus the matching Playwright locator.
+
+If the team runs Playwright, save the recording as a Playwright test instead: `wowsir record save tests/checkout.spec.ts`, or convert a `.wowsir` file with `wowsir export tests/checkout.wowsir` (writes `checkout.spec.ts`). Steps Playwright can't do the same way (iframes, closed shadow DOM, new tabs, layout watching) are marked with comments to adjust by hand.
+
 Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by one command per line, then `EOF`.
 
 ## Other

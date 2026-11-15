@@ -54,3 +54,13 @@ echo "$out" | grep -q "2 elements match button:Delete: used @e[0-9]* (in \"Buy m
 printf 'open localhost:%s/twins.html\nclick button:Delete\n' $PORT > "$WOWSIR_HOME/ambiguous.wowsir"
 if "$K" -s amb run "$WOWSIR_HOME/ambiguous.wowsir" >/dev/null; then fail "a test with an ambiguous target passed"; fi
 echo "✓ ambiguous targets warn, and fail inside a test file"
+
+# Playwright: a ref's stable target and locator, and a test file converted
+loc=$("$K" -s twins locator 'text=Walk dog >> button:Delete')
+echo "$loc" | grep -q "^wowsir      'text=Walk dog >> button:Delete'" || fail "locator: $loc"
+echo "$loc" | grep -q "^playwright  page.locator('\*', { has: page.getByText('Walk dog') })" || fail "locator: $loc"
+spec=$("$K" export twins.wowsir -o -) || fail "export twins.wowsir"
+echo "$spec" | grep -qF "await near(page.getByText('Walk dog'), page.getByRole('button', { name: 'Delete', exact: true })).click();" || fail "export: $spec"
+"$K" -s twins record save "$WOWSIR_HOME/rec.spec.ts" | grep -q "Playwright test" || fail "record save .spec.ts"
+grep -q "import { test, expect" "$WOWSIR_HOME/rec.spec.ts" || fail "record save .spec.ts wrote no Playwright test"
+echo "✓ locator, export and record save .spec.ts produce Playwright code"

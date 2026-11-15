@@ -839,6 +839,12 @@ function selectorFor(el, twins) {
   return parts.join(' > ');
 }
 K.selector = (t) => selectorFor(resolve(t));
+K.selectorInfo = (t) => {
+  const el = resolve(t);
+  const amb = ambiguity(t, el);
+  ref(el);
+  return { desc: describe(el), sel: selectorFor(el), amb };
+};
 
 // ---------------------------------------------------------------- actions
 function frameOffset(el) {

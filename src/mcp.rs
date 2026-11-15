@@ -18,7 +18,7 @@ Commands:
   text [T] | console [--errors] | net [--failed] | net --body PATTERN | errors | eval JS | screenshot [PATH] | viewport W H | viewport mobile | theme dark|light
   watch T... (then actions report "! moved:/jumped:") | expect still | screenshot --mark
   mock PATTERN 500|abort [--json X] [--delay MS] | mock off
-  run FILE... [--parallel N] | record save FILE | logout SITE | login URL (opens a window for the human to sign in; only when wowsir says sign-in is needed)
+  run FILE... [--parallel N] | record save FILE (.wowsir, or .spec.ts for Playwright) | locator T (stable target + Playwright locator) | logout SITE | login URL (opens a window for the human to sign in; only when wowsir says sign-in is needed)
 Targets: @e12 (ref) · button:Sign in (role:name) · text=Forgot password · CSS selector · A >> B (B near A, e.g. "h3:Billing >> button:Edit").
 Flags: -q (no diff) · --no-auth (logged-out session) · --timeout MS."#;
 
