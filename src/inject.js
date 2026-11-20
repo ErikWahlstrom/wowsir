@@ -368,7 +368,38 @@ function inViewport(el, vw) {
   let r = el.getBoundingClientRect();
   let ox = 0, oy = 0;
   for (let f = frameOf(el); f; f = frameOf(f)) { const fr = f.getBoundingClientRect(); ox += fr.left; oy += fr.top; }
-  return r.bottom + oy > 0 && r.top + oy < vw.h && r.right + ox > 0 && r.left + ox < vw.w && r.width + r.height > 0 && unobscured(el);
+  if (!(r.bottom + oy > 0 && r.top + oy < vw.h && r.right + ox > 0 && r.left + ox < vw.w && r.width + r.height > 0)) return false;
+  const c = clipRect(el);
+  return !!c && unobscured(el, c);
+}
+
+// el's box cut down to the viewport and to every ancestor that clips it (scroll panels,
+// overflow:hidden), following containing blocks for fixed/absolute elements.
+// null when nothing of it is left on screen.
+function clipRect(el) {
+  const doc = el.ownerDocument, win = doc.defaultView;
+  const r = el.getBoundingClientRect();
+  let l = Math.max(r.left, 0), t = Math.max(r.top, 0);
+  let R = Math.min(r.right, win.innerWidth), B = Math.min(r.bottom, win.innerHeight);
+  const up = (n) => n.assignedSlot || (n.parentNode instanceof ShadowRoot ? n.parentNode.host : n.parentElement);
+  let pos = getComputedStyle(el).position;
+  for (let p = up(el); p && p !== doc.body && p !== doc.documentElement; p = up(p)) {
+    const cs = getComputedStyle(p);
+    const makesBlock = cs.transform !== 'none' || cs.filter !== 'none' || /paint|layout|strict|content/.test(cs.contain);
+    // only the containing block chain clips fixed and absolute boxes
+    if (pos === 'fixed' && !makesBlock) continue;
+    if (pos === 'absolute' && cs.position === 'static' && !makesBlock) continue;
+    pos = cs.position;
+    if (cs.display === 'contents' || cs.display === 'inline') continue;
+    const cx = cs.overflowX !== 'visible', cy = cs.overflowY !== 'visible';
+    if (!cx && !cy) continue;
+    const pr = p.getBoundingClientRect();
+    const x0 = pr.left + p.clientLeft, y0 = pr.top + p.clientTop;
+    if (cx) { l = Math.max(l, x0); R = Math.min(R, x0 + p.clientWidth); }
+    if (cy) { t = Math.max(t, y0); B = Math.min(B, y0 + p.clientHeight); }
+    if (R < l || B < t) return null;
+  }
+  return R < l || B < t ? null : { l, t, R, B };
 }
 
 // the top-most element at a point of doc's viewport, through open/closed shadow roots
@@ -381,13 +412,10 @@ function hitAt(doc, x, y) {
   }
   return el;
 }
-// Some of el's on-screen part is not under another element (a sticky header, a toolbar, a modal).
+// Some of el's on-screen part (rect from clipRect) is not under another element (a sticky header, a toolbar, a modal).
 // Samples a few points; a hit on el, inside it, on an ancestor or on its label counts as showing.
-function unobscured(el) {
-  const doc = el.ownerDocument, win = doc.defaultView;
-  const r = el.getBoundingClientRect();
-  const l = Math.max(r.left, 0), t = Math.max(r.top, 0);
-  const R = Math.min(r.right, win.innerWidth), B = Math.min(r.bottom, win.innerHeight);
+function unobscured(el, { l, t, R, B }) {
+  const doc = el.ownerDocument;
   if (R - l < 1 || B - t < 1) return true; // too thin to sample: position alone decides
   const labels = el.labels ? [...el.labels] : [];
   for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.25], [0.85, 0.25], [0.15, 0.75], [0.85, 0.75]]) {

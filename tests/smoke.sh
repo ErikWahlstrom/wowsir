@@ -66,6 +66,17 @@ echo "$out" | grep -q 'row "Station | Wind"' || fail "sticky header row missing 
 if echo "$out" | grep -q 'row "Station 33 '; then fail "a row behind the sticky header is in snap --viewport: $out"; fi
 echo "$out" | grep -q 'row "Station 40 ' || fail "a visible row is missing from snap --viewport: $out"
 echo "✓ snap --viewport keeps sticky headers and drops what they cover"
+# snap --viewport inside a nested scroll panel: rows clipped by the panel or under its sticky bar are out
+"$K" -s panel -q viewport 390 844 >/dev/null
+"$K" -s panel -q open localhost:$PORT/panel.html >/dev/null
+for scope in "" "--in #readings"; do
+  out=$("$K" -s panel snap --viewport $scope)
+  echo "$out" | grep -q 'row "Station | Reading"' || fail "panel header row missing ($scope): $out"
+  echo "$out" | grep -q 'row "Station 13 ' || fail "visible panel row missing ($scope): $out"
+  if echo "$out" | grep -qE 'row "Station (06|18|21) '; then fail "clipped/covered panel row in snap --viewport ($scope): $out"; fi
+done
+"$K" -s panel -q close >/dev/null
+echo "✓ snap --viewport clips to scroll panels"
 
 # export reads an unquoted selector with spaces as one target
 printf 'open localhost:%s/twins.html\nclick #list [data-x=y]\n' $PORT > "$WOWSIR_HOME/sp.wowsir"
