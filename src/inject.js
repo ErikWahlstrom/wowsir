@@ -368,7 +368,33 @@ function inViewport(el, vw) {
   let r = el.getBoundingClientRect();
   let ox = 0, oy = 0;
   for (let f = frameOf(el); f; f = frameOf(f)) { const fr = f.getBoundingClientRect(); ox += fr.left; oy += fr.top; }
-  return r.bottom + oy > 0 && r.top + oy < vw.h && r.right + ox > 0 && r.left + ox < vw.w && r.width + r.height > 0;
+  return r.bottom + oy > 0 && r.top + oy < vw.h && r.right + ox > 0 && r.left + ox < vw.w && r.width + r.height > 0 && unobscured(el);
+}
+
+// the top-most element at a point of doc's viewport, through open/closed shadow roots
+function hitAt(doc, x, y) {
+  let el = doc.elementFromPoint(x, y);
+  for (let sr; el && (sr = rootOf(el)); ) {
+    const inner = sr.elementFromPoint(x, y);
+    if (!inner || inner === el) break;
+    el = inner;
+  }
+  return el;
+}
+// Some of el's on-screen part is not under another element (a sticky header, a toolbar, a modal).
+// Samples a few points; a hit on el, inside it, on an ancestor or on its label counts as showing.
+function unobscured(el) {
+  const doc = el.ownerDocument, win = doc.defaultView;
+  const r = el.getBoundingClientRect();
+  const l = Math.max(r.left, 0), t = Math.max(r.top, 0);
+  const R = Math.min(r.right, win.innerWidth), B = Math.min(r.bottom, win.innerHeight);
+  if (R - l < 1 || B - t < 1) return true; // too thin to sample: position alone decides
+  const labels = el.labels ? [...el.labels] : [];
+  for (const [fx, fy] of [[0.5, 0.5], [0.15, 0.25], [0.85, 0.25], [0.15, 0.75], [0.85, 0.75]]) {
+    const h = hitAt(doc, l + (R - l) * fx, t + (B - t) * fy);
+    if (!h || composedContains(el, h) || composedContains(h, el) || labels.some((lb) => composedContains(lb, h))) return true;
+  }
+  return false;
 }
 
 // Walk the children of `el`. Text is gathered in "inline runs": consecutive
@@ -458,7 +484,8 @@ function walkEl(n, out, inInter, noText, opts, vw, depth) {
     const cells = [...kids(n)].filter((c) => c.nodeType === 1 && c.checkVisibility());
     node.n = trunc(cells.map((c) => textOf(c)).join(' | '), opts.textLen * 2);
     node.row = true;
-    if (node.n.replace(/[ |]/g, '') && inViewport(n, vw)) { out.push(node); target = node.k; }
+    // a sticky header cell leaves its row behind: the row shows if any cell does
+    if (node.n.replace(/[ |]/g, '') && (inViewport(n, vw) || (vw && cells.some((c) => inViewport(c, vw))))) { out.push(node); target = node.k; }
     cNoText = true;
   } else if (role && CONTAINER.has(role) && !hiddenSelf && !inInter) {
     node.n = trunc(nameOf(n, role), 60);

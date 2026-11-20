@@ -1,0 +1,18 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Sticky</title>
+<style>
+  body { margin: 0; font: 16px/20px sans-serif; }
+  .bar { position: sticky; top: 0; height: 60px; background: #eee; z-index: 2; }
+  th { position: sticky; top: 60px; background: #ddd; z-index: 1; }
+  td, th { height: 30px; padding: 0 8px; }
+  table { border-collapse: collapse; }
+</style></head><body>
+<div class="bar"><button>Filter</button> <button>Sort</button></div>
+<table>
+  <thead><tr><th>Station</th><th>Wind</th></tr></thead>
+  <tbody id="rows"></tbody>
+</table>
+<script>
+rows.innerHTML = Array.from({ length: 100 }, (_, i) => `<tr><td>Station ${i}</td><td>${i % 13} m/s</td></tr>`).join('');
+</script>
+</body></html>

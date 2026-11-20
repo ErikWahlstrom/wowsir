@@ -57,6 +57,21 @@ echo "$out" | grep -q '… 55 more button' || fail "redrawn markers did not fold
 [ "$(echo "$out" | wc -l)" -lt 20 ] || fail "output after redrawing the markers too long: $out"
 echo "✓ similar siblings fold in snapshots and diffs"
 
+# snap --viewport: sticky table headers show, rows behind sticky controls don't
+"$K" -s sticky -q open localhost:$PORT/sticky.html >/dev/null
+"$K" -s sticky -q viewport 800 400 >/dev/null
+"$K" -s sticky -q scroll 'text=Station 40' >/dev/null
+out=$("$K" -s sticky snap --viewport)
+echo "$out" | grep -q 'row "Station | Wind"' || fail "sticky header row missing from snap --viewport: $out"
+if echo "$out" | grep -q 'row "Station 33 '; then fail "a row behind the sticky header is in snap --viewport: $out"; fi
+echo "$out" | grep -q 'row "Station 40 ' || fail "a visible row is missing from snap --viewport: $out"
+echo "✓ snap --viewport keeps sticky headers and drops what they cover"
+
+# export reads an unquoted selector with spaces as one target
+printf 'open localhost:%s/twins.html\nclick #list [data-x=y]\n' $PORT > "$WOWSIR_HOME/sp.wowsir"
+"$K" export "$WOWSIR_HOME/sp.wowsir" -o - | grep -qF "page.locator('#list [data-x=y]').click()" || fail "export split an unquoted selector"
+echo "✓ export keeps an unquoted selector with spaces whole"
+
 # a page the browser kept: say so on open, and fetch it fresh on demand
 "$K" -s cache -q open localhost:$PORT/cached.html >/dev/null
 out=$("$K" -s cache open localhost:$PORT/cached.html)
