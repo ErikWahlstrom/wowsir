@@ -68,6 +68,8 @@ pub struct Req {
     frame: String,
     start: Instant,
     status: i64,
+    /// where the response came from when not the server ("browser cache", "service worker"…)
+    cache: &'static str,
 }
 
 /// A network mock: requests whose URL matches `pattern` get a canned response.
@@ -172,6 +174,14 @@ pub struct State {
     refused: std::collections::HashSet<String>,
     /// network request ids a mock is deliberately holding back (never block settling)
     pub delayed: std::collections::HashSet<String>,
+    /// the main document came from a cache instead of the server ("browser cache", "service worker"…)
+    pub doc_cache: Option<&'static str>,
+    /// the main document's caching headers ("cache-control: max-age=600", …)
+    pub doc_headers: Vec<String>,
+    /// when the server produced the main document (its Date header, Unix seconds)
+    pub doc_date: Option<u64>,
+    /// `cache off`: always fetch from the server
+    pub cache_off: bool,
 }
 
 impl State {
@@ -207,6 +217,10 @@ impl State {
             mocked: Default::default(),
             refused: Default::default(),
             delayed: Default::default(),
+            doc_cache: None,
+            doc_headers: vec![],
+            doc_date: None,
+            cache_off: false,
         }
     }
 
@@ -301,7 +315,7 @@ async fn fetch_setup(cdp: &Arc<Cdp>, sid: &str, st: &Arc<Mutex<State>>) -> Resul
                         .then(|| json!({ "urlPattern": "*", "requestStage": "Request" })),
                 )
                 .collect(),
-            !s.mocks.is_empty(),
+            !s.mocks.is_empty() || s.cache_off,
         )
     };
     let _ = cdp
@@ -1644,7 +1658,7 @@ impl Session {
     }
 
     /// One Fetch interception covers both `block` and `mock`.
-    async fn apply_fetch(&self) -> Result<()> {
+    pub(crate) async fn apply_fetch(&self) -> Result<()> {
         fetch_setup(&self.cdp, &self.sid, &self.st).await?;
         // out-of-process frames make their own requests
         let frames: Vec<String> = self
@@ -1675,6 +1689,67 @@ pub fn exception_text(ex: &Value) -> String {
         .trim_start_matches("Error: ")
         .trim_start_matches("Retry: ")
         .to_string()
+}
+
+/// The headers that decide caching, as "name: value" lines, plus the Date header.
+fn cache_headers(h: &Value) -> (Vec<String>, Option<u64>) {
+    const KEEP: [&str; 9] = [
+        "cache-control",
+        "age",
+        "expires",
+        "x-cache",
+        "cf-cache-status",
+        "x-vercel-cache",
+        "x-nextjs-cache",
+        "last-modified",
+        "etag",
+    ];
+    let mut out = vec![];
+    let mut date = None;
+    if let Some(o) = h.as_object() {
+        for k in KEEP {
+            if let Some((_, v)) = o.iter().find(|(n, _)| n.eq_ignore_ascii_case(k)) {
+                out.push(format!(
+                    "{k}: {}",
+                    v.as_str().unwrap_or("").replace('\n', ", ")
+                ));
+            }
+        }
+        date = o
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case("date"))
+            .and_then(|(_, v)| http_date(v.as_str()?));
+    }
+    (out, date)
+}
+
+/// "Fri, 20 Nov 2026 11:40:12 GMT" → Unix seconds.
+pub fn http_date(s: &str) -> Option<u64> {
+    let p: Vec<&str> = s.split_whitespace().collect();
+    if p.len() < 5 {
+        return None;
+    }
+    let d: i64 = p[1].parse().ok()?;
+    let m = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ]
+    .iter()
+    .position(|x| x.eq_ignore_ascii_case(p[2]))? as i64
+        + 1;
+    let y: i64 = p[3].parse().ok()?;
+    let t: Vec<i64> = p[4].split(':').filter_map(|x| x.parse().ok()).collect();
+    if t.len() != 3 {
+        return None;
+    }
+    // days from civil (Howard Hinnant)
+    let y2 = if m <= 2 { y - 1 } else { y };
+    let era = y2.div_euclid(400);
+    let yoe = y2 - era * 400;
+    let mp = (m + 9) % 12;
+    let doy = (153 * mp + 2) / 5 + d - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    let days = era * 146097 + doe - 719468;
+    u64::try_from(days * 86400 + t[0] * 3600 + t[1] * 60 + t[2]).ok()
 }
 
 fn remote_to_text(o: &Value) -> String {
@@ -1789,6 +1864,9 @@ async fn event_loop(
                 let mut s = st.lock().unwrap();
                 if p["type"] == "Document" && p["frameId"] == target.as_str() {
                     s.doc_status = 0;
+                    s.doc_cache = None;
+                    s.doc_headers.clear();
+                    s.doc_date = None;
                 }
                 if let Some(body) = request_body(&p["request"]) {
                     let line = format!(
@@ -1812,19 +1890,45 @@ async fn event_loop(
                         frame: p["frameId"].as_str().unwrap_or("").to_string(),
                         start: Instant::now(),
                         status: 0,
+                        cache: "",
                     },
                 );
                 s.last_net_change = Instant::now();
             }
+            "Network.requestServedFromCache" => {
+                let id = p["requestId"].as_str().unwrap_or("");
+                if let Some(r) = st.lock().unwrap().inflight.get_mut(id) {
+                    r.cache = "browser cache";
+                }
+            }
             "Network.responseReceived" => {
                 let id = p["requestId"].as_str().unwrap_or("");
-                let status = p["response"]["status"].as_i64().unwrap_or(0);
+                let res = &p["response"];
+                let status = res["status"].as_i64().unwrap_or(0);
+                let from = if res["fromServiceWorker"] == true {
+                    "service worker"
+                } else if res["fromDiskCache"] == true {
+                    "browser cache"
+                } else if res["fromPrefetchCache"] == true {
+                    "prefetch cache"
+                } else {
+                    ""
+                };
                 let mut s = st.lock().unwrap();
-                if p["type"] == "Document" && p["frameId"] == target.as_str() {
-                    s.doc_status = status;
-                }
+                let mut cache = from;
                 if let Some(r) = s.inflight.get_mut(id) {
                     r.status = status;
+                    if cache.is_empty() {
+                        cache = r.cache;
+                    }
+                    r.cache = cache;
+                }
+                if p["type"] == "Document" && p["frameId"] == target.as_str() {
+                    s.doc_status = status;
+                    s.doc_cache = (!cache.is_empty()).then_some(cache);
+                    let (headers, date) = cache_headers(&res["headers"]);
+                    s.doc_headers = headers;
+                    s.doc_date = date;
                 }
                 if s.mocked.remove(id) {
                     if let Some(r) = s.inflight.remove(id) {
@@ -1874,7 +1978,10 @@ async fn event_loop(
                         s.note_error_in(&lab, format!("net {} {} failed: {err}", r.method, u));
                     }
                 } else {
-                    let line = format!("{} {} {} {} {ms}ms", r.status, r.method, u, r.rtype);
+                    let mut line = format!("{} {} {} {} {ms}ms", r.status, r.method, u, r.rtype);
+                    if !r.cache.is_empty() {
+                        line.push_str(&format!(" ({})", r.cache));
+                    }
                     s.net.push_back(line.clone());
                     s.done.push_back((id.to_string(), line));
                     while s.done.len() > 300 {

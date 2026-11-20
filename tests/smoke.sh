@@ -46,6 +46,27 @@ echo "$snap" | grep -q 'button "Submit"' || fail "controls of a CSS-shown <dialo
 if echo "$snap" | grep -qE 'Native hidden|Faded hidden'; then fail "a hidden <dialog> is in the outline: $snap"; fi
 echo "✓ a <dialog> shown by CSS is in the outline, hidden ones are not"
 
+# long runs of similar elements fold to a few plus a count; --in lists them all
+"$K" -s markers -q open localhost:$PORT/markers.html >/dev/null
+out=$("$K" -s markers snap)
+echo "$out" | grep -q '… 55 more button' || fail "snap did not fold the markers: $out"
+echo "$out" | grep -q 'button "Refresh"' || fail "content after the markers is missing: $out"
+[ "$("$K" -s markers snap --in .map | grep -c 'button "Station')" = 60 ] || fail "snap --in did not list every marker"
+out=$("$K" -s markers click button:Refresh)
+echo "$out" | grep -q '… 55 more button' || fail "redrawn markers did not fold: $out"
+[ "$(echo "$out" | wc -l)" -lt 20 ] || fail "output after redrawing the markers too long: $out"
+echo "✓ similar siblings fold in snapshots and diffs"
+
+# a page the browser kept: say so on open, and fetch it fresh on demand
+"$K" -s cache -q open localhost:$PORT/cached.html >/dev/null
+out=$("$K" -s cache open localhost:$PORT/cached.html)
+echo "$out" | grep -q "page came from the browser cache.*max-age=600" || fail "no cache warning on a cached page: $out"
+"$K" -s cache cache | grep -q "document 200 from the browser cache" || fail "cache did not report the cached document"
+out=$("$K" -s cache reload --hard)
+if echo "$out" | grep -q "came from the browser cache"; then fail "reload --hard used the cache: $out"; fi
+"$K" -s cache cache | grep -q "document 200 from the server" || fail "reload --hard did not ask the server"
+echo "✓ a page served from the browser cache is reported; reload --hard fetches it fresh"
+
 # ambiguous targets: a warning that names the twins, a failure inside a test file
 "$K" -s twins -q open localhost:$PORT/twins.html >/dev/null
 out=$("$K" -s twins click button:Delete) || fail "ambiguous click failed outside a test: $out"
