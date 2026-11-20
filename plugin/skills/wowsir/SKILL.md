@@ -106,6 +106,21 @@ If the team runs Playwright, save the recording as a Playwright test instead: `w
 
 Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by one command per line, then `EOF`.
 
+## Safari / iPhone (WebKit)
+
+wowsir drives Chrome only. When the site is mainly used on iPhone or in Safari, or a bug only shows up there, explore and fix in wowsir as usual, then check the flow in WebKit through Playwright:
+
+1. Write the flow as a `.wowsir` file with stable targets (`role:name`, `text=`, CSS), or `wowsir record save flow.wowsir` after exploring. Refs like `@e12` only exist in a running session and export as a `TODO`.
+2. Export it: `wowsir export flow.wowsir` writes `flow.spec.ts`.
+3. Write a `playwright.config.ts` next to it that emulates an iPhone. The export sets only the viewport size; a device also brings Safari's user agent, touch and pixel ratio:
+   ```ts
+   import { defineConfig, devices } from '@playwright/test';
+   export default defineConfig({ projects: [{ name: 'iphone', use: { ...devices['iPhone 15'] } }] });
+   ```
+4. Run it: `npx playwright test flow.spec.ts`. The first time needs `npm i -D @playwright/test` and `npx playwright install webkit` (about 100 MB). Ask the user before installing anything into their project; a scratch folder works too.
+
+This is the WebKit engine, not real iPhone Safari: the mobile toolbar, `100vh`, fonts and some touch behaviour still differ, so say that a check on a real phone remains worthwhile. Steps the export can't translate (cross-origin iframes, closed shadow DOM, new tabs) are marked with comments in the spec.
+
 ## Other
 
 - Debugging: `wowsir console --errors`, `wowsir net --failed`, `wowsir net --api`, `wowsir net --body /api/items` (response body of the latest matching request), `wowsir net --request /api/save` (the body a request sent, including blocked and mocked ones), `wowsir errors`, `wowsir eval "window.store.state"` (runs in the page's main world). For longer scripts, or to avoid quoting trouble, write the JavaScript to a file and run `wowsir eval --file check.js`. In `.wowsir` files and over MCP, `eval` takes the rest of the line verbatim, so quotes inside the JavaScript are kept.
