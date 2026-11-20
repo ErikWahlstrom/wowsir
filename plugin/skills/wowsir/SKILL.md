@@ -57,10 +57,20 @@ Actions already wait for the page to settle. For anything slower: `wowsir wait t
 - `wowsir snap --viewport` shows only what's on screen.
 - `wowsir text @e20` returns the plain text of one element.
 - Use `-q` on an action to skip the diff when you're chaining steps.
+- Long runs of similar elements (map markers, big lists, table rows) fold to the first five plus `… 430 more button (…)`. To see or reach the rest, use `wowsir snap --in @e12` (the container), `wowsir snap --grep Helsinki`, or `wowsir snap --all`.
+
+## Stale deploys and caching
+
+wowsir's browser keeps its HTTP cache for as long as the daemon runs. Sites that send `cache-control: max-age=…` (GitHub Pages: 10 minutes) can therefore show you an older deploy than `curl` sees. When `open` or `reload` reused a cached page, the output says `! page came from the browser cache, not the server (sent 4m ago; cache-control: max-age=600)`. Then:
+- `wowsir reload --hard` fetches the page and its files fresh (like Shift+Reload, past service workers too);
+- `wowsir cache` shows where the document came from and its caching headers (`age`, `x-cache: HIT` = the CDN's copy);
+- `wowsir net` marks responses served from a cache;
+- `wowsir cache off` makes every request go to the server while you test a deploy; `wowsir cache clear` empties the cache.
 
 ## Targets
 
 Quote CSS selectors that start with `#` on the command line (`wowsir text '#total'`): the shell treats an unquoted `#total` as a comment and wowsir never sees it. In `.wowsir` files and over MCP, `#id` works unquoted, and `# note` (hash, then space) is a comment.
+Commands that take only a target (`click`, `hover`, `tap`, `check`, `focus`) read the rest of the line as the target, so `click .list button.active` works unquoted. Commands that also take a value (`fill`, `select`, `upload`) need a selector with spaces quoted: `fill '.form input[name=q]' hello`.
 
 `@e12` · `button:Sign in` · `textbox:Email` · `link:Pricing` · `h1:Welcome` · `text=Forgot password` · CSS (`#id`, `[data-testid=x]`).
 Chain with ` >> ` to pick an element near another one: `"h2:Shipping >> checkbox:Gift wrap"` takes the first match after that heading in its section, and `"text=You have unsaved changes >> button:Discard"` finds the Discard next to that message. `snap --in <heading>` and `text <heading>` cover the heading's whole section.
@@ -95,6 +105,21 @@ Need a stable target to write into a test yourself? `wowsir locator @e12` prints
 If the team runs Playwright, save the recording as a Playwright test instead: `wowsir record save tests/checkout.spec.ts`, or convert a `.wowsir` file with `wowsir export tests/checkout.wowsir` (writes `checkout.spec.ts`). Steps Playwright can't do the same way (iframes, closed shadow DOM, new tabs, layout watching) are marked with comments to adjust by hand.
 
 Multi-step scripts can be written directly: `wowsir run - <<'EOF'` followed by one command per line, then `EOF`.
+
+## Safari / iPhone (WebKit)
+
+wowsir drives Chrome only. When the site is mainly used on iPhone or in Safari, or a bug only shows up there, explore and fix in wowsir as usual, then check the flow in WebKit through Playwright:
+
+1. Write the flow as a `.wowsir` file with stable targets (`role:name`, `text=`, CSS), or `wowsir record save flow.wowsir` after exploring. Refs like `@e12` only exist in a running session and export as a `TODO`.
+2. Export it: `wowsir export flow.wowsir` writes `flow.spec.ts`.
+3. Write a `playwright.config.ts` next to it that emulates an iPhone. The export sets only the viewport size; a device also brings Safari's user agent, touch and pixel ratio:
+   ```ts
+   import { defineConfig, devices } from '@playwright/test';
+   export default defineConfig({ projects: [{ name: 'iphone', use: { ...devices['iPhone 15'] } }] });
+   ```
+4. Run it: `npx playwright test flow.spec.ts`. The first time needs `npm i -D @playwright/test` and `npx playwright install webkit` (about 100 MB). Ask the user before installing anything into their project; a scratch folder works too.
+
+This is the WebKit engine, not real iPhone Safari: the mobile toolbar, `100vh`, fonts and some touch behaviour still differ, so say that a check on a real phone remains worthwhile. Steps the export can't translate (cross-origin iframes, closed shadow DOM, new tabs) are marked with comments in the spec.
 
 ## Other
 

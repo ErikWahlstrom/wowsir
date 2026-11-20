@@ -37,7 +37,7 @@ Agents that test websites spend most of their tokens and round-trips on two thin
 - **Every action reports its own result.** After a click or fill, wowsir waits until the page settles, then returns:
   - the new URL;
   - console errors, uncaught exceptions, failed or 4xx/5xx requests, and dialogs (plus a one-line summary of console warnings);
-  - a diff of the page against what the agent last saw.
+  - a diff of the page against what the agent last saw. Long runs of similar elements (hundreds of map markers, big tables) fold to the first five and a count, so one busy widget can't flood the output; `snap --in`, `--grep` and `--all` list them all.
 
   The agent doesn't need to re-snapshot after every step.
 - **Compact snapshots.** The output is an accessibility-style outline with `@eN` refs, built in one in-page pass (~10–40 ms on Wikipedia/GitHub). Filters keep it small:
@@ -111,7 +111,7 @@ wowsir help
 
 | | |
 |---|---|
-| Navigate | `open URL` `back` `forward` `reload` `url` `title` |
+| Navigate | `open URL` `back` `forward` `reload [--hard]` `url` `title` `cache [clear\|off\|on]` |
 | Layout | `watch T…` (each action then reports `! moved:` / `! jumped:` for those elements, sampled every frame) · `expect still [T…]` · `screenshot --mark` |
 | Mock | `mock /api/items 500` · `mock /api/items --json '{"items":[]}'` · `mock POST /api/x 200` (one method only) · `mock /api/x abort` · `mock /api/x --delay 3000` · `mock off` |
 | Read-only | `readonly on\|strict\|off` · `readonly allow PATTERN` · `readonly` (status) — see [Read-only mode](#read-only-mode) |

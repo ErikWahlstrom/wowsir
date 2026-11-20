@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Markers</title></head><body>
+<main>
+  <h1>Stations</h1>
+  <div class="map" role="region" aria-label="Map"></div>
+  <p id="out"></p>
+  <button id="refresh">Refresh</button>
+</main>
+<script>
+const map = document.querySelector('.map');
+let wind = 1;
+function draw() {
+  map.replaceChildren(...Array.from({ length: 60 }, (_, i) => {
+    const b = document.createElement('button');
+    b.className = 'm m' + i;
+    b.textContent = `Station ${i} · ${(wind + i / 10).toFixed(1)} m/s`;
+    b.onclick = () => (out.textContent = 'picked station ' + i);
+    return b;
+  }));
+}
+draw();
+refresh.onclick = () => { wind += 1; draw(); };
+</script>
+</body></html>

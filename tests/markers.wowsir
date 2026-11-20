@@ -1,0 +1,7 @@
+# many similar elements (map markers): the output folds them, targets still reach any one
+open localhost:8765/markers.html
+# an unquoted selector with spaces is one target
+click .map button.m42
+expect text "picked station 42"
+click button:Refresh
+expect text "Station 59 · 7.9 m/s"

@@ -17,7 +17,9 @@ use std::time::{Duration, Instant};
 
 const HELP: &str = r#"wowsir — fast headless browser for agents. Every action returns what changed.
 
-NAVIGATE   open <url> · back · forward · reload · url · title
+NAVIGATE   open <url> · back · forward · reload [--hard] · url · title
+           cache (where the page came from + caching headers) · cache clear · cache off|on
+             `! page came from the browser cache` after open = an older copy; reload --hard asks the server
 LAYOUT     watch T... · watch (list) · watch off [T]   watched elements report `! moved:` / `! jumped:` after each action
            expect still [T...] · screenshot [PATH] --mark (outlines + coordinates of watched elements) · --mark=T
 MOCK       mock [METHOD] PATTERN STATUS|abort [--json X|--body X|--file F] [--delay MS] [--doc] · mock (list) · mock off [PATTERN]
@@ -29,6 +31,7 @@ TABS       popups and target=_blank pages are followed automatically (! new tab 
            tabs · tab N · tab new [URL] · tab close [N]
 SEE        snap [-i] [--grep TEXT] [--in TARGET] [--viewport] [--full] [--urls] [--ids] [--all]
              -i interactive only · --grep filter lines · --in scope to element
+             long runs of similar elements (map markers, rows) fold to 5 + "… N more button"; --in/--grep/--all list them
            text [TARGET] · html [TARGET] · screenshot [PATH] [--full] [--el TARGET]
 ACT        click T [--double|--right] [--ctrl|--shift|--alt|--meta|--mod] · click --at X,Y (viewport point: maps, canvas) · tap T|X,Y (touch)
            fill T TEXT · type [T] TEXT · press KEY... (Enter, Tab, Control+a, Mod+Enter)
@@ -57,6 +60,7 @@ TARGETS (T)  @e12               ref from a snapshot (stable while the element li
              button:Sign in     role:name — link:, textbox:, checkbox:, combobox:, h1:, ...
              text=Forgot password
              #id / .class / [data-testid=x]   any CSS selector (pierces open and closed shadow DOM)
+                                one-target commands take the rest of the line: click .list button.x
                                 quote '#id' in the shell: unquoted, # starts a shell comment
              A >> B             B near A: inside it, else the first after it in its section
                                 ("h2:Shipping >> checkbox:Gift wrap", "text=Unsaved >> button:Discard")

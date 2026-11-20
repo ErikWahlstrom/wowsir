@@ -24,6 +24,12 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def end_headers(self):
+        # cached.html is cacheable like a GitHub Pages deploy (10 minutes)
+        if self.path.startswith("/cached.html"):
+            self.send_header("Cache-Control", "max-age=600")
+        super().end_headers()
+
 
 port, root = int(sys.argv[1]), sys.argv[2]
 Server(("::", port), functools.partial(Quiet, directory=root)).serve_forever()

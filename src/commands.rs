@@ -179,6 +179,14 @@ impl Args {
             .iter()
             .find_map(|n| self.flags.get(*n).map(|s| s.as_str()))
     }
+    /// The whole positional rest as one target: an unquoted CSS selector with
+    /// spaces (`click .list button.x` in a run file or MCP call) stays one selector.
+    fn target(&self) -> Result<String> {
+        if self.pos.is_empty() {
+            return Err(anyhow!("missing target"));
+        }
+        Ok(self.pos.join(" "))
+    }
     fn p(&self, i: usize, what: &str) -> Result<&str> {
         self.pos
             .get(i)
@@ -305,6 +313,129 @@ fn collapse_removed(d: &[String]) -> Vec<String> {
         }
     }
     out
+}
+
+/// Long runs of same-kind siblings (map markers, big lists, table rows) shrink
+/// to the first few plus a count, so one busy widget can't drown the output.
+/// `diff`: lines carry a 2-char "+ "/"- "/"  " prefix.
+pub fn fold_similar(lines: &[String], diff: bool) -> Vec<String> {
+    const MIN: usize = 20;
+    const KEEP: usize = 5;
+    let split = |l: &str| -> (String, String) {
+        if diff && l.len() >= 2 && l.is_char_boundary(2) {
+            (l[..2].to_string(), l[2..].to_string())
+        } else {
+            (String::new(), l.to_string())
+        }
+    };
+    let key = |l: &str| -> Option<(String, usize, String)> {
+        let (sign, body) = split(l);
+        let t = body.trim_start();
+        if t.is_empty() || t.starts_with('…') {
+            return None;
+        }
+        let kind = if t.starts_with('"') {
+            "text".to_string()
+        } else {
+            t.split([' ', '"']).next()?.to_string()
+        };
+        Some((sign, indent_of(&body), kind))
+    };
+    let keys: Vec<_> = lines.iter().map(|l| key(l)).collect();
+    let mut out = vec![];
+    let mut i = 0;
+    while i < lines.len() {
+        let Some(k) = &keys[i] else {
+            out.push(lines[i].clone());
+            i += 1;
+            continue;
+        };
+        // sibling starts, skipping each one's (deeper) children
+        let mut starts = vec![i];
+        let mut j = i + 1;
+        loop {
+            while j < lines.len()
+                && keys[j]
+                    .as_ref()
+                    .is_some_and(|(s, ind, _)| *s == k.0 && *ind > k.1)
+            {
+                j += 1;
+            }
+            if j < lines.len() && keys[j].as_ref() == Some(k) {
+                starts.push(j);
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        if starts.len() < MIN {
+            out.push(lines[i].clone());
+            i += 1;
+            continue;
+        }
+        out.extend(lines[i..starts[KEEP]].iter().cloned());
+        // the enclosing element's ref, if it has one, scopes a full listing
+        let parent = (0..i).rev().find_map(|p| {
+            let (_, body) = split(&lines[p]);
+            (indent_of(&body) < k.1).then_some(body)
+        });
+        let scope = parent.and_then(|b| {
+            b.split_whitespace()
+                .find(|w| w.starts_with("@e") && w[2..].chars().all(|c| c.is_ascii_digit()))
+                .map(str::to_string)
+        });
+        let how = match scope {
+            Some(r) => format!("wowsir snap --in {r} lists them all"),
+            None => "wowsir snap --grep TEXT finds one".to_string(),
+        };
+        out.push(format!(
+            "{}{}… {} more {} ({how})",
+            k.0,
+            " ".repeat(k.1),
+            starts.len() - KEEP,
+            k.2
+        ));
+        i = j;
+    }
+    out
+}
+
+/// Fold, then cut to `max` lines; returns the lines and how many were cut.
+fn fold_cap(lines: &[String], more: usize, max: usize) -> (Vec<String>, usize) {
+    let mut l = fold_similar(lines, false);
+    let cut = l.len().saturating_sub(max);
+    l.truncate(max);
+    (l, more + cut)
+}
+
+/// " (sent 4m ago; cache-control: max-age=600)": how old a response is and why it was kept
+fn cache_detail(headers: &[String], date: Option<u64>) -> String {
+    let mut parts = vec![];
+    if let Some(d) = date {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let ago = now.saturating_sub(d);
+        parts.push(format!(
+            "sent {} ago",
+            if ago < 120 {
+                format!("{ago}s")
+            } else if ago < 7200 {
+                format!("{}m", ago / 60)
+            } else {
+                format!("{}h", ago / 3600)
+            }
+        ));
+    }
+    if let Some(cc) = headers.iter().find(|h| h.starts_with("cache-control:")) {
+        parts.push(cc.clone());
+    }
+    if parts.is_empty() {
+        String::new()
+    } else {
+        format!(" ({})", parts.join("; "))
+    }
 }
 
 fn snap_header(title: &str, url: &str) -> String {
@@ -462,19 +593,32 @@ impl Session {
                     t.push_str(&format!("\n! {ev}"));
                 }
                 let msg = e.to_string();
+                // `fill .form input hello`: the selector's spaces split it into the value
+                if msg.contains("no element matches")
+                    && matches!(
+                        raw.first().map(|s| s.as_str()),
+                        Some("fill" | "select" | "upload")
+                    )
+                    && raw.len() > 3
+                {
+                    t.push_str(
+                        "\n(a selector with spaces must be quoted: fill '.form input' text)",
+                    );
+                }
                 if !ctx.quiet
                     && (msg.contains("no element matches")
                         || msg.contains("covered by")
                         || msg.contains("stale ref"))
                 {
                     if let Ok(s) = self
-                        .snapshot(json!({ "interactive": true, "max": 40 }))
+                        .snapshot(json!({ "interactive": true, "max": 4000 }))
                         .await
                     {
+                        let (lines, more) = fold_cap(&s.lines, s.more, 40);
                         t.push_str("\ninteractive elements now:\n");
-                        t.push_str(&s.lines.join("\n"));
-                        if s.more > 0 {
-                            t.push_str(&format!("\n… {} more (wowsir snap -i)", s.more));
+                        t.push_str(&lines.join("\n"));
+                        if more > 0 {
+                            t.push_str(&format!("\n… {more} more (wowsir snap -i)"));
                         }
                     }
                 }
@@ -535,6 +679,16 @@ impl Session {
         let status = self.st.lock().unwrap().doc_status;
         if navigated && status >= 400 {
             t.push_str(&format!("\n! document status {status}"));
+        }
+        // a stale deploy: the browser reused its copy instead of asking the server
+        if head.starts_with("open") || head == "reload" {
+            let s = self.st.lock().unwrap();
+            if let (Some(src), true) = (s.doc_cache, s.doc_seq != before_doc) {
+                t.push_str(&format!(
+                    "\n! page came from the {src}, not the server{}: `wowsir reload --hard` fetches it fresh",
+                    cache_detail(&s.doc_headers, s.doc_date)
+                ));
+            }
         }
         let h = head.to_lowercase();
         // signing in or out is expected to land on a login page
@@ -617,20 +771,23 @@ impl Session {
             }
             return Out::ok(t);
         }
-        match self.snapshot(json!({ "wantBase": true })).await {
+        match self
+            .snapshot(json!({ "wantBase": true, "max": 4000 }))
+            .await
+        {
             Ok(s) => {
                 let base = s.base.clone().unwrap_or_default();
                 let full = |t: &mut String| {
+                    let (lines, more) = fold_cap(&s.lines, s.more, 400);
                     t.push('\n');
                     t.push_str(&snap_header(&s.title, &s.url));
-                    if !s.lines.is_empty() {
+                    if !lines.is_empty() {
                         t.push('\n');
-                        t.push_str(&s.lines.join("\n"));
+                        t.push_str(&lines.join("\n"));
                     }
-                    if s.more > 0 {
+                    if more > 0 {
                         t.push_str(&format!(
-                            "\n… {} more lines (wowsir snap --grep/--in/-i to focus)",
-                            s.more
+                            "\n… {more} more lines (wowsir snap --grep/--in/-i to focus)"
                         ));
                     }
                 };
@@ -649,7 +806,7 @@ impl Session {
                         } else {
                             t.push_str(&format!(
                                 "\n~ {n} changed:\n{}",
-                                collapse_removed(&d).join("\n")
+                                fold_similar(&collapse_removed(&d), true).join("\n")
                             ));
                         }
                     }
@@ -766,7 +923,7 @@ impl Session {
             if n > 0 {
                 t.push_str(&format!(
                     "\n~ {n} changed:\n{}",
-                    collapse_removed(&d).join("\n")
+                    fold_similar(&collapse_removed(&d), true).join("\n")
                 ));
             }
         } else if new_doc {
@@ -1190,12 +1347,74 @@ impl Session {
                 }
             }
             "reload" => {
+                // --hard: bypass the browser cache and service worker, like Shift+Reload
+                let hard = a.has(&["hard", "fresh"]);
                 self.st.lock().unwrap().loading = true;
-                self.call("Page.reload", json!({})).await?;
-                Ok("reload".into())
+                self.call("Page.reload", json!({ "ignoreCache": hard }))
+                    .await?;
+                Ok(if hard { "reload --hard" } else { "reload" }.into())
             }
+            "cache" => match a.pos.first().map(|s| s.as_str()).unwrap_or("show") {
+                "clear" => {
+                    self.call("Network.clearBrowserCache", json!({})).await?;
+                    Ok("cache cleared: the next load asks the server for everything".into())
+                }
+                "off" | "on" => {
+                    let off = a.pos[0] == "off";
+                    self.st.lock().unwrap().cache_off = off;
+                    self.apply_fetch().await?;
+                    Ok(if off {
+                        "cache off: every request goes to the server (until `wowsir cache on`)"
+                    } else {
+                        "cache on"
+                    }
+                    .into())
+                }
+                "show" => {
+                    let product = self
+                        .call("Browser.getVersion", json!({}))
+                        .await
+                        .ok()
+                        .and_then(|v| v["product"].as_str().map(String::from))
+                        .unwrap_or_else(|| "Chrome".into());
+                    let s = self.st.lock().unwrap();
+                    let mut t = format!(
+                        "browser: {product} on this machine, wowsir's own profile (its cache lasts until `wowsir stop`){}",
+                        if s.cache_off { " · cache off" } else { "" }
+                    );
+                    if s.doc_status > 0 {
+                        t.push_str(&format!(
+                            "\ndocument {} from the {}{}",
+                            s.doc_status,
+                            s.doc_cache.unwrap_or("server"),
+                            cache_detail(&[], s.doc_date)
+                        ));
+                        for h in &s.doc_headers {
+                            t.push_str(&format!("\n  {h}"));
+                        }
+                    }
+                    let cached = s
+                        .net
+                        .iter()
+                        .filter(|l| l.ends_with(" cache)") || l.ends_with("(service worker)"))
+                        .count();
+                    if cached > 0 {
+                        t.push_str(&format!(
+                            "\n{cached} recent responses came from a cache (wowsir net shows which)"
+                        ));
+                    }
+                    Ok(t)
+                }
+                other => Err(anyhow!("cache {other}? use: cache [clear|off|on]")),
+            },
             "snap" | "snapshot" | "s" => {
                 let scoped = a.has(&["in", "viewport", "v"]);
+                let max = a
+                    .get(&["max"])
+                    .and_then(|m| m.parse::<usize>().ok())
+                    .unwrap_or(if a.has(&["all"]) { 100000 } else { 400 });
+                // a focused or exhaustive listing shows every sibling; the overview folds long runs
+                let fold = !a.has(&["all", "grep", "g", "in"]);
                 let opts = json!({
                     "interactive": a.has(&["i", "interactive"]),
                     "full": a.has(&["full", "f"]),
@@ -1204,10 +1423,13 @@ impl Session {
                     "viewport": a.has(&["viewport", "v"]),
                     "urls": a.has(&["urls", "u"]),
                     "ids": a.has(&["ids"]),
-                    "max": a.get(&["max"]).and_then(|m| m.parse::<u64>().ok()).unwrap_or(if a.has(&["all"]) { 100000 } else { 400 }),
+                    "max": if fold { max.max(4000) } else { max },
                     "wantBase": !scoped,
                 });
-                let s = self.snapshot(opts).await?;
+                let mut s = self.snapshot(opts).await?;
+                if fold {
+                    (s.lines, s.more) = fold_cap(&s.lines, s.more, max);
+                }
                 if let Some(b) = s.base.clone() {
                     self.baseline = Some(b);
                 }
@@ -1268,7 +1490,7 @@ impl Session {
                 Ok(format!("{cmd} at {pt} → {what}"))
             }
             "tap" => {
-                let target = a.p(0, "target")?;
+                let target = &a.target()?;
                 let v = self
                     .actionable("point", &[json!(target), json!(Self::is_ref(target))], to)
                     .await?;
@@ -1284,7 +1506,7 @@ impl Session {
                 Ok(format!("tap {}", v["desc"].as_str().unwrap_or(target)))
             }
             "click" | "dblclick" => {
-                let target = a.p(0, "target")?;
+                let target = &a.target()?;
                 let count = if cmd == "dblclick" || a.has(&["double"]) {
                     2
                 } else {
@@ -1335,7 +1557,7 @@ impl Session {
                 ))
             }
             "hover" => {
-                let target = a.p(0, "target")?;
+                let target = &a.target()?;
                 let v = self
                     .actionable("point", &[json!(target), json!(Self::is_ref(target))], to)
                     .await?;
@@ -1440,7 +1662,7 @@ impl Session {
                 ))
             }
             "check" | "uncheck" => {
-                let target = a.p(0, "target")?;
+                let target = &a.target()?;
                 let want = cmd == "check";
                 let cur = self.k("checked", &[json!(target)]).await?;
                 if cur.as_bool() == Some(want) {
@@ -1482,7 +1704,7 @@ impl Session {
                 )
             }
             "focus" => {
-                let target = a.p(0, "target")?;
+                let target = &a.target()?;
                 self.js(&format!("__wowsir.resolve({}).focus()", json!(target)))
                     .await?;
                 Ok(format!("focus {target}"))
@@ -2644,7 +2866,59 @@ fn truncate_chars(s: &str, max: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_point, split_line};
+    use super::{fold_similar, parse_point, split_line};
+
+    #[test]
+    fn http_dates() {
+        assert_eq!(
+            crate::session::http_date("Fri, 20 Nov 2026 11:40:12 GMT"),
+            Some(1_795_174_812)
+        );
+        assert_eq!(
+            crate::session::http_date("Thu, 01 Jan 1970 00:00:00 GMT"),
+            Some(0)
+        );
+        assert_eq!(crate::session::http_date("garbage"), None);
+    }
+
+    fn lines(s: &str) -> Vec<String> {
+        s.lines().map(String::from).collect()
+    }
+
+    #[test]
+    fn long_sibling_runs_fold() {
+        let mut snap = vec!["main".to_string(), "  region \"Map\" @e1".to_string()];
+        for i in 0..30 {
+            snap.push(format!("    button \"Station {i}\" @e{}", i + 2));
+            snap.push(format!("      \"detail {i}\""));
+        }
+        snap.push("  button \"Refresh\" @e99".to_string());
+        let f = fold_similar(&snap, false);
+        assert_eq!(f.len(), 2 + 10 + 2);
+        assert_eq!(
+            f[12],
+            "    … 25 more button (wowsir snap --in @e1 lists them all)"
+        );
+        assert_eq!(f[13], "  button \"Refresh\" @e99");
+        // short runs stay as they are
+        assert_eq!(fold_similar(&snap[..20], false), snap[..20].to_vec());
+    }
+
+    #[test]
+    fn diff_runs_fold_per_sign() {
+        let mut d = lines("  region \"Map\"");
+        for i in 0..25 {
+            d.push(format!("+     button \"Station {i}\""));
+        }
+        d.push("- … 25 lines removed".to_string());
+        let f = fold_similar(&d, true);
+        assert_eq!(f.len(), 1 + 5 + 1 + 1);
+        assert_eq!(
+            f[6],
+            "+     … 20 more button (wowsir snap --grep TEXT finds one)"
+        );
+        assert_eq!(f[7], "- … 25 lines removed");
+    }
 
     fn sp(s: &str) -> Vec<String> {
         split_line(s).unwrap()
