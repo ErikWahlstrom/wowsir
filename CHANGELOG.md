@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/ErikWahlstrom/wowsir/compare/v0.4.0...v0.4.1) (2026-11-20)
+
+
+### Bug Fixes
+
+* sticky headers in snap --viewport, unquoted selectors in export ([#18](https://github.com/ErikWahlstrom/wowsir/issues/18)) ([6d38c43](https://github.com/ErikWahlstrom/wowsir/commit/6d38c43720c629b310f0aae39cd1772f719c890c))
+
 ## [0.4.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.3.0...v0.4.0) (2026-11-20)
 
 
