@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.3.0...v0.4.0) (2026-11-20)
+
+
+### Features
+
+* fold similar elements, read unquoted selectors, report cached pages ([#16](https://github.com/ErikWahlstrom/wowsir/issues/16)) ([1291fe8](https://github.com/ErikWahlstrom/wowsir/commit/1291fe82da0aa95c1b6885af353c0a9eab87283f))
+
 ## [0.3.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.2.1...v0.3.0) (2026-11-15)
 
 
