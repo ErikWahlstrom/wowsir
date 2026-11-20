@@ -230,6 +230,8 @@ impl Spec {
         let pos: Vec<&str> = a.pos.iter().map(|s| s.as_str()).collect();
         let p0 = pos.first().copied().unwrap_or("");
         let rest = |i: usize| pos.get(i..).map(|r| r.join(" ")).unwrap_or_default();
+        // one-target commands read the rest of the line, as wowsir does: `click #tabs [data-tab=x]`
+        let whole = rest(0);
         match cmd {
             "open" | "goto" | "navigate" => {
                 self.line(format!("await page.goto({});", js(&normalize_url(p0))))
@@ -251,7 +253,7 @@ impl Spec {
                         });
                     }
                 }
-                let l = self.loc(p0);
+                let l = self.loc(&whole);
                 if cmd == "tap" {
                     return self.line(format!("await {l}.tap(); // needs hasTouch in the config"));
                 }
@@ -316,7 +318,7 @@ impl Spec {
                 self.line(format!("await {l}.selectOption({arg});"));
             }
             "check" | "uncheck" | "hover" | "focus" => {
-                let l = self.loc(p0);
+                let l = self.loc(&whole);
                 self.line(format!("await {l}.{cmd}();"));
             }
             "upload" => {
@@ -752,5 +754,23 @@ mod tests {
         assert!(out.contains("await expect(page.getByText('Welcome').filter({ visible: true }).first()).toBeVisible();"));
         assert!(out.contains("const errors: string[] = [];"));
         assert!(out.contains("// wowsir: snap -i  (not an action; skipped)"));
+    }
+
+    #[test]
+    fn unquoted_selector_with_spaces() {
+        let out = spec(
+            "click #live-tabs [data-tab=nearby]\nhover .menu a.active\n",
+            "t",
+            "t.wowsir",
+        )
+        .unwrap();
+        assert!(
+            out.contains("await page.locator('#live-tabs [data-tab=nearby]').click();"),
+            "{out}"
+        );
+        assert!(
+            out.contains("await page.locator('.menu a.active').hover();"),
+            "{out}"
+        );
     }
 }
