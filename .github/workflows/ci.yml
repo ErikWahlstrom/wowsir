@@ -39,3 +39,20 @@ jobs:
         run: ./tests/smoke.sh
         env:
           WOWSIR_NO_SANDBOX: "1"
+
+  # ARM Linux has no Google Chrome on the runner: use Playwright's headless shell,
+  # which also checks that wowsir finds Playwright's linux-arm64 folder
+  test-linux-arm64:
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npx -y playwright@1 install --with-deps chromium-headless-shell
+      - name: Build and run tests/*.wowsir
+        run: ./tests/smoke.sh
+        env:
+          WOWSIR_NO_SANDBOX: "1"
