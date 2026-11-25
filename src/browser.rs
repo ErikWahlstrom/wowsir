@@ -63,6 +63,7 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
                 "chrome-headless-shell-mac-x64/chrome-headless-shell",
                 "chrome-linux/headless_shell",
                 "chrome-headless-shell-linux64/chrome-headless-shell",
+                "chrome-headless-shell-linux-arm64/chrome-headless-shell",
                 "chrome-win/headless_shell.exe",
                 "chrome-headless-shell-win64/chrome-headless-shell.exe",
             ] {
@@ -79,6 +80,7 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
         cands.push(d.join("chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"));
         cands.push(d.join("chrome-linux/chrome"));
         cands.push(d.join("chrome-linux64/chrome"));
+        cands.push(d.join("chrome-linux-arm64/chrome"));
         cands.push(d.join("chrome-win/chrome.exe"));
         cands.push(d.join("chrome-win64/chrome.exe"));
     }
