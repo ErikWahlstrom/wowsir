@@ -111,3 +111,39 @@ echo "$spec" | grep -qF "await near(page.getByText('Walk dog'), page.getByRole('
 "$K" -s twins record save "$WOWSIR_HOME/rec.spec.ts" | grep -q "Playwright test" || fail "record save .spec.ts"
 grep -q "import { test, expect" "$WOWSIR_HOME/rec.spec.ts" || fail "record save .spec.ts wrote no Playwright test"
 echo "✓ locator, export and record save .spec.ts produce Playwright code"
+
+# no daemon: forced, and as a fallback when the daemon can't run (sockets blocked in a sandbox)
+out=$(printf 'open localhost:%s/panel.html\nexpect text "Station 13"\n' $PORT | WOWSIR_NO_DAEMON=1 "$K" run -) || fail "no-daemon run: $out"
+WOWSIR_NO_DAEMON=1 "$K" status | grep -q "no daemon running" || fail "no-daemon status"
+# an unwritable daemon directory stands in for the sandbox (chmod has no effect on Windows; root ignores it)
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) ;; *) if [ "$(id -u)" != 0 ]; then
+  mkdir -p "$WOWSIR_HOME/ro" && chmod 500 "$WOWSIR_HOME/ro"
+  out=$(WOWSIR_HOME="$WOWSIR_HOME/ro/x" "$K" open localhost:$PORT/panel.html) || fail "fallback without a daemon: $out"
+  echo "$out" | grep -q "^! no daemon (it can't run here" || fail "no fallback note: $out"
+  chmod 700 "$WOWSIR_HOME/ro"
+fi;; esac
+echo "✓ commands run without a daemon when it can't start"
+
+# Chrome's own sandbox can't start: retried with --no-sandbox; other start failures show Chrome's output
+real="${WOWSIR_CHROME:-}"
+for c in "$HOME"/Library/Caches/ms-playwright/chromium_headless_shell-*/chrome-*/*headless*shell \
+  "$HOME"/.cache/ms-playwright/chromium_headless_shell-*/chrome-*/*headless*shell \
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" /usr/bin/google-chrome; do
+  [ -n "$real" ] || { [ -x "$c" ] && real="$c"; }
+done
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) real="";; esac   # Chrome can't exec a shell script there
+if [ -n "$real" ]; then
+  cat > "$WOWSIR_HOME/fakechrome" <<SH
+#!/bin/sh
+case "\$*" in *--no-sandbox*) exec "$real" "\$@";; esac
+echo "FATAL:zygote_host_impl_linux.cc No usable sandbox! You can try using --no-sandbox." >&2
+exit 1
+SH
+  printf '#!/bin/sh\necho "error while loading shared libraries: libnss3.so" >&2\nexit 127\n' > "$WOWSIR_HOME/badchrome"
+  chmod +x "$WOWSIR_HOME/fakechrome" "$WOWSIR_HOME/badchrome"
+  out=$(WOWSIR_NO_DAEMON=1 WOWSIR_NO_SANDBOX= WOWSIR_CHROME="$WOWSIR_HOME/fakechrome" "$K" open localhost:$PORT/panel.html 2>&1) || fail "no-sandbox retry: $out"
+  echo "$out" | grep -q "running it with --no-sandbox" || fail "no-sandbox retry not reported: $out"
+  out=$(WOWSIR_NO_DAEMON=1 WOWSIR_CHROME="$WOWSIR_HOME/badchrome" "$K" open about:blank 2>&1) && fail "a broken Chrome started"
+  echo "$out" | grep -q "libnss3.so" || fail "Chrome's output missing from the start error: $out"
+  echo "✓ Chrome start failures: sandbox retried, others explained"
+fi
