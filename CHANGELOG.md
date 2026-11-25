@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.4.1...v0.5.0) (2026-11-25)
+
+
+### Features
+
+* run without a daemon in sandboxes, find PLAYWRIGHT_BROWSERS_PATH, explain Chrome start failures ([#20](https://github.com/ErikWahlstrom/wowsir/issues/20)) ([4bfe62a](https://github.com/ErikWahlstrom/wowsir/commit/4bfe62a8b8620cc895dbc154779024acd2d0fe5f))
+
 ## [0.4.1](https://github.com/ErikWahlstrom/wowsir/compare/v0.4.0...v0.4.1) (2026-11-20)
 
 
