@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.5.0...v0.6.0) (2026-11-25)
+
+
+### Features
+
+* Linux arm64 — find Playwright's arm64 browsers, publish an arm64 binary ([30600b8](https://github.com/ErikWahlstrom/wowsir/commit/30600b83f60a59705e634a375ff81e5eb173d5db))
+* Linux arm64 support (Playwright arm64 browsers, arm64 release binary) ([#22](https://github.com/ErikWahlstrom/wowsir/issues/22)) ([30600b8](https://github.com/ErikWahlstrom/wowsir/commit/30600b83f60a59705e634a375ff81e5eb173d5db))
+
 ## [0.5.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.4.1...v0.5.0) (2026-11-25)
 
 
