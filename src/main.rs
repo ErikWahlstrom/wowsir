@@ -55,6 +55,8 @@ TESTS      run FILE...|- [--parallel N]   (one command per line, # comments; sto
            record save FILE.spec.ts · export FILE.wowsir [-o OUT]   (as a Playwright test)
            locator T               a stable target for T (refs are per page load) and its Playwright locator
 SESSIONS   -s NAME / WOWSIR_SESSION=NAME (isolated cookies/storage; parallel-safe) · sessions · close · stop · status
+           No daemon (sandboxes that block local sockets, or WOWSIR_NO_DAEMON=1): each command runs
+           in its own browser, so put a whole flow in one `wowsir run -` call.
 
 TARGETS (T)  @e12               ref from a snapshot (stable while the element lives)
              button:Sign in     role:name — link:, textbox:, checkbox:, combobox:, h1:, ...
@@ -476,9 +478,20 @@ fn run_files(base: &Req, files: &[String], jobs: usize) -> i32 {
 }
 
 fn send(req: &Req, autostart: bool) -> Result<Resp, String> {
+    if no_daemon_forced() {
+        return Ok(run_in_process(req, None));
+    }
     let mut stream = match platform::connect(&daemon::endpoint()) {
         Ok(s) => s,
-        Err(_) if autostart => start_daemon(req.headed)?,
+        // a sandbox that forbids local sockets (Claude Code's on Linux, seccomp in CI)
+        Err(e) if autostart && e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Ok(run_in_process(req, Some(e.to_string())));
+        }
+        Err(_) if autostart => match start_daemon(req.headed) {
+            Ok(s) => s,
+            Err(e) if blocked(&e) => return Ok(run_in_process(req, Some(e))),
+            Err(e) => return Err(e),
+        },
         Err(e) => return Err(e.to_string()),
     };
     let mut req = req.clone();
@@ -499,6 +512,40 @@ fn send(req: &Req, autostart: bool) -> Result<Resp, String> {
     serde_json::from_str(&line).map_err(|e| e.to_string())
 }
 
+/// WOWSIR_NO_DAEMON=1: every command runs in its own browser in this process.
+fn no_daemon_forced() -> bool {
+    std::env::var("WOWSIR_NO_DAEMON").is_ok_and(|v| !v.is_empty() && v != "0")
+}
+
+fn blocked(err: &str) -> bool {
+    err.contains("Operation not permitted")
+        || err.contains("Permission denied")
+        || err.contains("Read-only file system")
+}
+
+/// Run one request without a daemon. `why`: the socket error that forced it (it gets
+/// a note, since state does not carry over to the next command).
+fn run_in_process(req: &Req, why: Option<String>) -> Resp {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .enable_all()
+        .build()
+        .unwrap();
+    let mut resp = rt.block_on(daemon::run_once(req.clone()));
+    if let Some(why) = why {
+        let one_shot = !matches!(
+            req.cmd.first().map(|s| s.as_str()),
+            Some("run" | "stop" | "quit" | "status" | "sessions" | "close")
+        );
+        if one_shot {
+            resp.out.push_str(&format!(
+                "\n! no daemon (it can't run here: {why}), so this command ran in its own browser and nothing carries over to the next one. Run a whole flow in one call: `wowsir run - <<'EOF'` … `EOF` (set WOWSIR_NO_DAEMON=1 to skip the socket attempt)"
+            ));
+        }
+    }
+    resp
+}
+
 fn start_daemon(headed: bool) -> Result<platform::ClientStream, String> {
     let dir = daemon::dir();
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -517,12 +564,25 @@ fn start_daemon(headed: bool) -> Result<platform::ClientStream, String> {
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
     platform::detach(&mut cmd);
-    cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("could not start daemon: {e}"))?;
     let start = Instant::now();
     loop {
         if let Ok(s) = platform::connect(&daemon::endpoint()) {
             return Ok(s);
+        }
+        // exited with an error (a clean exit means another daemon won the race)
+        if let Ok(Some(st)) = child.try_wait() {
+            if !st.success() {
+                let log = std::fs::read_to_string(dir.join("daemon.log")).unwrap_or_default();
+                let last = log
+                    .lines()
+                    .rev()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("");
+                return Err(format!("daemon did not start: {last}"));
+            }
         }
         if start.elapsed() > Duration::from_secs(15) {
             return Err(format!(

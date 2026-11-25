@@ -161,7 +161,7 @@ pub fn write_private(path: &Path, body: &str) -> Result<()> {
 }
 
 pub async fn run(url: &str, out: &Path, timeout: Duration) -> Result<usize> {
-    let b = browser::launch(true)?;
+    let b = browser::start(true).await?;
     let cdp = b.cdp.clone();
     cdp.call(None, "Target.createTarget", json!({ "url": url }))
         .await?;

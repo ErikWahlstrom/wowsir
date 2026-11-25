@@ -71,6 +71,8 @@ npx playwright install chromium-headless-shell   # optional, fastest
 WOWSIR_CHROME=/path/to/chrome                    # override
 ```
 
+It looks for Playwright's browsers in `$PLAYWRIGHT_BROWSERS_PATH` (if set) and Playwright's default cache directory.
+
 ## Use with coding agents
 
 Install the binary first (above). Then give your agent the wowsir skill, which teaches it the commands, targets and test files.
@@ -222,6 +224,10 @@ GitHub's Ubuntu and macOS runners come with Google Chrome, which wowsir finds by
   env:
     WOWSIR_NO_SANDBOX: "1"   # Chrome's sandbox often can't start in CI containers (automatic when running as root)
 ```
+
+If Chrome's own sandbox can't start (containers, bwrap), wowsir retries once with `--no-sandbox` and says so; `WOWSIR_NO_SANDBOX=1` skips the first try.
+
+In a sandbox that forbids local sockets (such as Claude Code's Bash sandbox on Linux), the CLI can't reach its daemon. wowsir then runs each command in its own browser in the CLI process and says so; nothing carries over between commands, so run a whole flow in one call with `wowsir run -` (steps on stdin) or a `.wowsir` file. `WOWSIR_NO_DAEMON=1` picks that mode up front.
 
 Start your app first and point the tests at it (`open localhost:3000/...`). This repo's own workflow is in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 

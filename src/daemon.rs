@@ -101,15 +101,7 @@ pub async fn run(headed: bool) -> Result<()> {
     };
     let mut listener = crate::platform::Listener::bind(&endpoint())?;
 
-    let daemon = Arc::new(Daemon {
-        browser: Mutex::new(None),
-        sessions: Mutex::new(HashMap::new()),
-        headed,
-        contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
-        last_used: std::sync::Mutex::new(Instant::now()),
-        build: build_id(),
-        warned: Default::default(),
-    });
+    let daemon = Arc::new(Daemon::new(headed));
     // warm the browser immediately; the first command is already on its way
     {
         let d2 = daemon.clone();
@@ -145,7 +137,40 @@ pub async fn run(headed: bool) -> Result<()> {
     }
 }
 
+/// One command without a daemon, for sandboxes that forbid local sockets: this
+/// process launches its own browser, runs `req` and closes it again.
+pub async fn run_once(req: Req) -> Resp {
+    match req.cmd.first().map(|s| s.as_str()).unwrap_or("") {
+        "stop" | "quit" | "sessions" | "close" | "status" | "auth-reload" | "auth-forget" => {
+            return Resp {
+                out: "no daemon running (each command runs in its own browser here)".into(),
+                code: 0,
+            }
+        }
+        _ => {}
+    }
+    let d = Daemon::new(req.headed);
+    let resp = d.process(req).await;
+    for (_, s) in d.sessions.lock().await.drain() {
+        s.lock().await.close().await;
+    }
+    drop(d.browser.lock().await.take());
+    resp
+}
+
 impl Daemon {
+    fn new(headed: bool) -> Daemon {
+        Daemon {
+            browser: Mutex::new(None),
+            sessions: Mutex::new(HashMap::new()),
+            headed,
+            contexts: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            last_used: std::sync::Mutex::new(Instant::now()),
+            build: build_id(),
+            warned: Default::default(),
+        }
+    }
+
     async fn shutdown(&self) -> ! {
         for (_, s) in self.sessions.lock().await.drain() {
             s.lock().await.close().await;
@@ -164,7 +189,7 @@ impl Daemon {
         if dead {
             self.sessions.lock().await.clear();
             *b = None;
-            let br = browser::launch(self.headed)?;
+            let br = browser::start(self.headed).await?;
             // follow pages the sites open (popups, target=_blank) and close
             let mut rx = br.cdp.subscribe("");
             let contexts = self.contexts.clone();

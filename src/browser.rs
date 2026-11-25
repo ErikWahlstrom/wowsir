@@ -10,6 +10,8 @@ pub struct Browser {
     pub cdp: Arc<Cdp>,
     pub child: Child,
     pub profile: PathBuf,
+    /// launched with --no-sandbox
+    pub no_sandbox: bool,
 }
 
 impl Drop for Browser {
@@ -47,19 +49,13 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
         let shell = p.to_string_lossy().contains("headless_shell");
         return Ok((p, shell));
     }
-    let pw = if cfg!(target_os = "macos") {
-        home().join("Library/Caches/ms-playwright")
-    } else if cfg!(windows) {
-        std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(home)
-            .join("ms-playwright")
-    } else {
-        home().join(".cache/ms-playwright")
-    };
+    let dirs = playwright_dirs();
     // chrome-headless-shell: the old headless mode, no browser UI layer → fastest startup.
     if !headed {
-        if let Some(d) = newest(&pw, "chromium_headless_shell-") {
+        for d in dirs
+            .iter()
+            .filter_map(|pw| newest(pw, "chromium_headless_shell-"))
+        {
             for c in [
                 "chrome-mac/headless_shell",
                 "chrome-mac-arm64/chrome-headless-shell",
@@ -78,7 +74,7 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
         }
     }
     let mut cands: Vec<PathBuf> = vec![];
-    if let Some(d) = newest(&pw, "chromium-") {
+    for d in dirs.iter().filter_map(|pw| newest(pw, "chromium-")) {
         cands.push(d.join("chrome-mac/Chromium.app/Contents/MacOS/Chromium"));
         cands.push(d.join("chrome-mac-arm64/Chromium.app/Contents/MacOS/Chromium"));
         cands.push(d.join("chrome-linux/chrome"));
@@ -118,10 +114,121 @@ pub fn find_chrome(headed: bool) -> Result<(PathBuf, bool)> {
             return Ok((c, false));
         }
     }
-    bail!("no Chromium found. Install one (`npx playwright install chromium-headless-shell`) or set WOWSIR_CHROME=/path/to/chrome")
+    bail!("no Chromium found (looked in {}). Install one (`npx playwright install chromium-headless-shell`), or set PLAYWRIGHT_BROWSERS_PATH or WOWSIR_CHROME=/path/to/chrome",
+        dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", "))
 }
 
-pub fn launch(headed: bool) -> Result<Browser> {
+/// Where Playwright keeps its browsers: $PLAYWRIGHT_BROWSERS_PATH if set (`0` means
+/// node_modules/playwright-core/.local-browsers, found from the working directory up),
+/// then the per-user default.
+fn playwright_dirs() -> Vec<PathBuf> {
+    let mut dirs = vec![];
+    match std::env::var_os("PLAYWRIGHT_BROWSERS_PATH") {
+        Some(v) if v == "0" => {
+            if let Ok(cwd) = std::env::current_dir() {
+                for a in cwd.ancestors() {
+                    let d = a.join("node_modules/playwright-core/.local-browsers");
+                    if d.is_dir() {
+                        dirs.push(d);
+                        break;
+                    }
+                }
+            }
+        }
+        Some(v) if !v.is_empty() => {
+            let p = PathBuf::from(v);
+            // relative paths are relative to where Playwright ran: try the working directory
+            dirs.push(if p.is_relative() {
+                std::env::current_dir().map(|c| c.join(&p)).unwrap_or(p)
+            } else {
+                p
+            });
+        }
+        _ => {}
+    }
+    dirs.push(if cfg!(target_os = "macos") {
+        home().join("Library/Caches/ms-playwright")
+    } else if cfg!(windows) {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(home)
+            .join("ms-playwright")
+    } else {
+        home().join(".cache/ms-playwright")
+    });
+    dirs
+}
+
+/// Launch Chromium and check that it answers. If Chrome's own sandbox can't start
+/// (containers, bwrap and other sandboxes), retry once without it, as Playwright does.
+pub async fn start(headed: bool) -> Result<Browser> {
+    let mut br = launch(headed, false)?;
+    let Err(e) = br
+        .cdp
+        .call(None, "Browser.getVersion", serde_json::json!({}))
+        .await
+    else {
+        return Ok(br);
+    };
+    let (status, log) = br.died();
+    let sandboxed = !br.no_sandbox;
+    drop(br);
+    if sandboxed && sandbox_failure(&log) {
+        let mut br = launch(headed, true)?;
+        match br
+            .cdp
+            .call(None, "Browser.getVersion", serde_json::json!({}))
+            .await
+        {
+            Ok(_) => {
+                eprintln!("Chrome's sandbox could not start here; running it with --no-sandbox (set WOWSIR_NO_SANDBOX=1 to skip the first try)");
+                return Ok(br);
+            }
+            Err(e) => {
+                let (status, log) = br.died();
+                bail!(startup_error(e, status, &log, false));
+            }
+        }
+    }
+    bail!(startup_error(e, status, &log, sandboxed))
+}
+
+fn sandbox_failure(log: &str) -> bool {
+    let l = log.to_lowercase();
+    l.contains("sandbox") || l.contains("namespace") || l.contains("zygote")
+}
+
+fn startup_error(e: anyhow::Error, status: String, log: &str, sandboxed: bool) -> String {
+    let tail: Vec<&str> = log.lines().filter(|l| !l.trim().is_empty()).collect();
+    let tail = tail[tail.len().saturating_sub(6)..].join("\n  ");
+    let mut m = format!("Chrome did not start ({e}; {status})");
+    if !tail.is_empty() {
+        m += &format!(". Its last output:\n  {tail}");
+    }
+    if sandboxed {
+        m += "\nInside a container or sandbox (Docker, bwrap) Chrome's own sandbox often can't start: try WOWSIR_NO_SANDBOX=1";
+    }
+    m
+}
+
+impl Browser {
+    /// After a failed start: how Chrome exited, and what it printed.
+    fn died(&mut self) -> (String, String) {
+        let mut status = "still running".to_string();
+        for _ in 0..20 {
+            if let Ok(Some(s)) = self.child.try_wait() {
+                status = format!("exited: {s}");
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+        let log =
+            std::fs::read_to_string(self.profile.join("chrome-stderr.log")).unwrap_or_default();
+        (status, log)
+    }
+}
+
+pub fn launch(headed: bool, force_no_sandbox: bool) -> Result<Browser> {
     let (bin, _shell) = find_chrome(headed)?;
     let profile = std::env::temp_dir().join(format!("wowsir-profile-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&profile);
@@ -159,9 +266,10 @@ pub fn launch(headed: bool) -> Result<Browser> {
             "--window-size=1280,800",
         ]);
     // Chrome's sandbox can't start as root (containers) or under some CI kernels: opt out there
-    let no_sandbox = std::env::var("WOWSIR_NO_SANDBOX")
-        .map(|v| v != "0" && !v.is_empty())
-        .unwrap_or(false)
+    let no_sandbox = force_no_sandbox
+        || std::env::var("WOWSIR_NO_SANDBOX")
+            .map(|v| v != "0" && !v.is_empty())
+            .unwrap_or(false)
         || (cfg!(target_os = "linux") && crate::platform::is_root());
     if no_sandbox {
         cmd.arg("--no-sandbox");
@@ -173,9 +281,13 @@ pub fn launch(headed: bool) -> Result<Browser> {
         cmd.arg("--headless=new");
     }
     cmd.arg("about:blank");
+    // Chrome's stderr goes to a file in its profile, read back if it fails to start
+    let stderr = std::fs::File::create(profile.join("chrome-stderr.log"))
+        .map(Stdio::from)
+        .unwrap_or_else(|_| Stdio::null());
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(stderr);
     let (child, rx, tx) = crate::platform::spawn_with_cdp_pipe(&mut cmd)
         .with_context(|| format!("launching {}", bin.display()))?;
     let cdp = Cdp::new(rx, tx);
@@ -183,5 +295,6 @@ pub fn launch(headed: bool) -> Result<Browser> {
         cdp,
         child,
         profile,
+        no_sandbox,
     })
 }
