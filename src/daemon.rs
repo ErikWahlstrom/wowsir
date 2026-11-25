@@ -46,6 +46,10 @@ pub struct Req {
     /// `run FILE`: a test, where a target matching several elements fails the step
     #[serde(default)]
     pub strict_targets: bool,
+    /// `run`: print every step's full output (what changed, warnings), as single commands do.
+    /// On for steps piped in (`run -`) and with `run --show`.
+    #[serde(default)]
+    pub show: bool,
     /// the client's build_id(): a daemon started from another build says so
     #[serde(default)]
     pub build: String,
@@ -436,7 +440,7 @@ impl Daemon {
             strict_targets: req.strict_targets,
         };
         if let Some(batch) = req.batch {
-            return run_batch(&mut s, batch, ctx).await;
+            return run_batch(&mut s, batch, ctx, req.show).await;
         }
         let out = s.exec(&req.cmd, &ctx).await;
         Resp {
@@ -446,14 +450,25 @@ impl Daemon {
     }
 }
 
-async fn run_batch(s: &mut Session, steps: Vec<(usize, Vec<String>)>, ctx: Ctx) -> Resp {
+/// Commands that only show the page: their output is the point, so `run` always prints it.
+const SHOWS_PAGE: &[&str] = &[
+    "snap", "snapshot", "s", "text", "html", "console", "logs", "net", "network", "url", "title",
+    "cookies", "tabs", "errors", "locator", "selector", "eval", "js",
+];
+
+async fn run_batch(
+    s: &mut Session,
+    steps: Vec<(usize, Vec<String>)>,
+    ctx: Ctx,
+    show: bool,
+) -> Resp {
     let t0 = Instant::now();
     let total = steps.len();
     let mut lines = vec![];
     let verbose = !ctx.quiet;
     let step_ctx = Ctx {
         cwd: ctx.cwd.clone(),
-        quiet: true,
+        quiet: !show || ctx.quiet,
         full_after: false,
         timeout: ctx.timeout,
         strict_targets: ctx.strict_targets,
@@ -474,7 +489,10 @@ async fn run_batch(s: &mut Session, steps: Vec<(usize, Vec<String>)>, ctx: Ctx) 
                 code: 1,
             };
         }
-        if last && verbose {
+        let shows_page = step
+            .first()
+            .is_some_and(|c| SHOWS_PAGE.contains(&c.as_str()));
+        if (last && verbose) || show || shows_page {
             lines.push(out.text);
         } else {
             // headline + any warnings, never snapshots

@@ -139,16 +139,20 @@ This is the WebKit engine, not real iPhone Safari: the mobile toolbar, `100vh`, 
 - Tabs: when a click opens a popup or a `target=_blank` page, wowsir switches to it and prints `! new tab N opened`. When a popup closes itself (e.g. after a sign-in), wowsir goes back to the opener. `wowsir tabs` lists tabs, `wowsir tab N` switches, `wowsir tab close` closes the current one.
 - Speed up heavy pages: `wowsir block lite` (blocks images, fonts, and media).
 - Waiting: actions already wait for the page to settle. Use `wowsir wait text "Done"`, `wowsir wait gone ".spinner"`, or `--timeout 15000` for slow things.
-- If a command ends with `! no daemon`, the sandbox blocks wowsir's background process, so every call starts a fresh browser on a blank page. Send the whole flow as one call instead:
+- If a command ends with `! no daemon`, the sandbox blocks wowsir's background process, so every call starts a fresh browser on a blank page. Explore and act in one call instead: `run -` prints each step's output like a single command would (the snapshot, text, what changed), and refs from a `snap -i` work until the run ends. Look first, then act on what you saw in a second run:
   ```sh
+  wowsir run - <<'EOF'
+  open localhost:3000/login
+  snap -i
+  EOF
   wowsir run - <<'EOF'
   open localhost:3000/login
   fill textbox:Email a@b.c
   click button:Sign in
-  expect text "Welcome"
-  snap
+  text main
   EOF
   ```
+  Refs (`@e5`) don't survive into the next run, which starts a new browser: in later runs use role:name targets (`button:Sign in`) or `text=…`.
 - Clean up with `wowsir close` (ends the session) or `wowsir stop` (stops the daemon and browser).
 
 ## When wowsir itself gets it wrong

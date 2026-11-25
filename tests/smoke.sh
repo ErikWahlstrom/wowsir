@@ -147,3 +147,14 @@ SH
   echo "$out" | grep -q "libnss3.so" || fail "Chrome's output missing from the start error: $out"
   echo "✓ Chrome start failures: sandbox retried, others explained"
 fi
+
+# run shows the page: snap/text output always; `run -` also prints what each action changed, and refs work within the run
+out=$(printf 'open localhost:%s/twins.html\nsnap -i\nclick @e2\ntext h1\n' $PORT | WOWSIR_NO_DAEMON=1 "$K" run -) || fail "run - exploring: $out"
+echo "$out" | grep -q 'button "Delete all" @e3' || fail "run - hid snap -i: $out"
+echo "$out" | grep -q '+ "deleted Walk dog"' || fail "run - hid what changed: $out"
+printf 'open localhost:%s/twins.html\nsnap -i\nclick @e2\nexpect text "deleted"\n' $PORT > "$WOWSIR_HOME/show.wowsir"
+out=$("$K" -s show run "$WOWSIR_HOME/show.wowsir") || fail "run FILE: $out"
+echo "$out" | grep -q 'button "Delete all" @e3' || fail "run FILE hid snap -i: $out"
+if echo "$out" | grep -q 'deleted Walk dog'; then fail "run FILE printed what changed without --show: $out"; fi
+"$K" -s show2 run "$WOWSIR_HOME/show.wowsir" --show | grep -q '+ "deleted Walk dog"' || fail "run FILE --show hid what changed"
+echo "✓ run prints what the page shows; run - and --show print what changed"
