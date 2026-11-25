@@ -50,13 +50,15 @@ AUTH       login URL               opens a visible window; a human signs in; coo
            Saved logins load into every new session automatically (--no-auth for a clean one).
            logout SITE             delete a saved login and wipe that site's cookies/storage from running sessions
            state save FILE · state load FILE   (Playwright-compatible storageState)
-TESTS      run FILE...|- [--parallel N]   (one command per line, # comments; stops at first failure)
+TESTS      run FILE...|- [--parallel N] [--show]   (one command per line, # comments; stops at first failure)
+           Prints what snap/text/html/console/net/url/title/cookies/tabs/eval show; `run -` and
+           --show also print each action's "what changed" lines (-q turns those off).
            record [show|save FILE|clear]   (your session as a replayable test, refs → stable selectors)
            record save FILE.spec.ts · export FILE.wowsir [-o OUT]   (as a Playwright test)
            locator T               a stable target for T (refs are per page load) and its Playwright locator
 SESSIONS   -s NAME / WOWSIR_SESSION=NAME (isolated cookies/storage; parallel-safe) · sessions · close · stop · status
            No daemon (sandboxes that block local sockets, or WOWSIR_NO_DAEMON=1): each command runs
-           in its own browser, so put a whole flow in one `wowsir run -` call.
+           in its own browser, so put a whole flow in one `wowsir run -` call (refs live until it ends).
 
 TARGETS (T)  @e12               ref from a snapshot (stable while the element lives)
              button:Sign in     role:name — link:, textbox:, checkbox:, combobox:, h1:, ...
@@ -323,6 +325,7 @@ fn main() {
                                 std::process::exit(2);
                             })
                     }
+                    "--show" => req.show = true,
                     f => files.push(f.to_string()),
                 }
             }
@@ -336,6 +339,8 @@ fn main() {
                     req.batch = Some(steps);
                     // a test file (not steps piped in by an agent): ambiguous targets fail
                     req.strict_targets = src != "-";
+                    // steps piped in by an agent: show everything, as single commands would
+                    req.show |= src == "-";
                 }
                 Err(e) => {
                     eprintln!("FAIL {e}");
@@ -539,7 +544,7 @@ fn run_in_process(req: &Req, why: Option<String>) -> Resp {
         );
         if one_shot {
             resp.out.push_str(&format!(
-                "\n! no daemon (it can't run here: {why}), so this command ran in its own browser and nothing carries over to the next one. Run a whole flow in one call: `wowsir run - <<'EOF'` … `EOF` (set WOWSIR_NO_DAEMON=1 to skip the socket attempt)"
+                "\n! no daemon (it can't run here: {why}), so this command ran in its own browser and nothing carries over to the next one. Run a whole flow in one call, `wowsir run - <<'EOF'` … `EOF`: it prints each step's output (snap -i, text, what changed), and refs from a snap work until the run ends (set WOWSIR_NO_DAEMON=1 to skip the socket attempt)"
             ));
         }
     }

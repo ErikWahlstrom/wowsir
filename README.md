@@ -227,7 +227,7 @@ GitHub's Ubuntu and macOS runners come with Google Chrome, which wowsir finds by
 
 If Chrome's own sandbox can't start (containers, bwrap), wowsir retries once with `--no-sandbox` and says so; `WOWSIR_NO_SANDBOX=1` skips the first try.
 
-In a sandbox that forbids local sockets (such as Claude Code's Bash sandbox on Linux), the CLI can't reach its daemon. wowsir then runs each command in its own browser in the CLI process and says so; nothing carries over between commands, so run a whole flow in one call with `wowsir run -` (steps on stdin) or a `.wowsir` file. `WOWSIR_NO_DAEMON=1` picks that mode up front.
+In a sandbox that forbids local sockets (such as Claude Code's Bash sandbox on Linux), the CLI can't reach its daemon. wowsir then runs each command in its own browser in the CLI process and says so; nothing carries over between commands, so run a whole flow in one call with `wowsir run -` (steps on stdin) or a `.wowsir` file. `run -` prints each step's output as a single command would (snapshots, text, what changed), and refs from a `snap` inside the run work until it ends; `run FILE --show` does the same for a file. `WOWSIR_NO_DAEMON=1` picks that mode up front.
 
 Start your app first and point the tests at it (`open localhost:3000/...`). This repo's own workflow is in [.github/workflows/ci.yml](.github/workflows/ci.yml).
 
