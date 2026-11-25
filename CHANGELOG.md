@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.6.0...v0.7.0) (2026-11-25)
+
+
+### Features
+
+* run prints what the page shows (snap, text, what changed) ([#24](https://github.com/ErikWahlstrom/wowsir/issues/24)) ([6d8fa4a](https://github.com/ErikWahlstrom/wowsir/commit/6d8fa4a04f08a37e2d4c7d38caffbb929ea02a09))
+* run prints what the page shows; run - and --show print what changed ([6d8fa4a](https://github.com/ErikWahlstrom/wowsir/commit/6d8fa4a04f08a37e2d4c7d38caffbb929ea02a09))
+
 ## [0.6.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.5.0...v0.6.0) (2026-11-25)
 
 
