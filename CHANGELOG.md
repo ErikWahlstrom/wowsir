@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/ErikWahlstrom/wowsir/compare/v0.7.0...v0.7.1) (2026-11-28)
+
+
+### Bug Fixes
+
+* saved logins load into new sessions again; state save works ([#26](https://github.com/ErikWahlstrom/wowsir/issues/26)) ([71bf182](https://github.com/ErikWahlstrom/wowsir/commit/71bf1827d48118c4dcc1725cc4c944b7932b1c2a))
+
 ## [0.7.0](https://github.com/ErikWahlstrom/wowsir/compare/v0.6.0...v0.7.0) (2026-11-25)
 
 
