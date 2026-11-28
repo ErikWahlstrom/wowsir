@@ -24,6 +24,26 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def do_GET(self):
+        # a sign-in that sets a cookie for the parent domain (Domain=app.localhost), as an
+        # app on sub.app.localhost does when its OAuth callback lands on the apex
+        if self.path.startswith("/set-parent-cookie"):
+            return self.reply("signed in", "sid=abc123; Domain=app.localhost; Path=/; HttpOnly; SameSite=Lax")
+        # what the server received: the page shows the Cookie header
+        if self.path.startswith("/whoami"):
+            return self.reply("cookie: " + (self.headers.get("Cookie") or "(none)"))
+        return super().do_GET()
+
+    def reply(self, text, cookie=None):
+        body = f"<!doctype html><title>t</title><p>{text}</p>".encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self.end_headers()
+        self.wfile.write(body)
+
     def end_headers(self):
         # cached.html is cacheable like a GitHub Pages deploy (10 minutes)
         if self.path.startswith("/cached.html"):

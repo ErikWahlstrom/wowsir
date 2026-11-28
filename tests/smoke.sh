@@ -158,3 +158,18 @@ echo "$out" | grep -q 'button "Delete all" @e3' || fail "run FILE hid snap -i: $
 if echo "$out" | grep -q 'deleted Walk dog'; then fail "run FILE printed what changed without --show: $out"; fi
 "$K" -s show2 run "$WOWSIR_HOME/show.wowsir" --show | grep -q '+ "deleted Walk dog"' || fail "run FILE --show hid what changed"
 echo "✓ run prints what the page shows; run - and --show print what changed"
+
+# saved login with a parent-domain cookie (Domain=app.localhost) on plain http and a non-default
+# port: a new session must send it to sub.app.localhost (regression: it was saved but not sent)
+"$K" -s psave -q open "http://sub.app.localhost:$PORT/set-parent-cookie" >/dev/null
+mkdir -p "$WOWSIR_AUTH_DIR"
+"$K" -s psave -q state save "$WOWSIR_AUTH_DIR/sub.app.localhost.json" >/dev/null
+"$K" -s psave -q close >/dev/null
+grep -q '"domain": ".app.localhost"' "$WOWSIR_AUTH_DIR/sub.app.localhost.json" || fail "parent-domain cookie not saved: $(cat "$WOWSIR_AUTH_DIR/sub.app.localhost.json")"
+out=$("$K" -s pload open "http://sub.app.localhost:$PORT/whoami")
+echo "$out" | grep -q 'cookie: sid=abc123' || fail "saved parent-domain cookie not sent by a new session: $out"
+out=$("$K" -s pload open "http://other.app.localhost:$PORT/whoami")
+echo "$out" | grep -q 'cookie: sid=abc123' || fail "parent-domain cookie not sent to a sibling subdomain: $out"
+"$K" -s pload -q close >/dev/null
+rm -f "$WOWSIR_AUTH_DIR/sub.app.localhost.json"
+echo "✓ saved parent-domain cookies are restored and sent (http, non-default port)"
