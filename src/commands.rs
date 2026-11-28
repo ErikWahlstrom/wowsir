@@ -943,11 +943,8 @@ impl Session {
             .map(|a| a.iter().map(crate::login::clean_cookie).collect())
             .unwrap_or_default();
         if !cookies.is_empty() {
-            self.call(
-                "Storage.setCookies",
-                json!({ "cookies": cookies, "browserContextId": self.browser_ctx }),
-            )
-            .await?;
+            self.storage("Storage.setCookies", json!({ "cookies": cookies }))
+                .await?;
         }
         let mut n_ls = 0;
         for o in st["origins"].as_array().cloned().unwrap_or_default() {
@@ -971,13 +968,7 @@ impl Session {
     /// Remove a site's cookies (by domain) and web storage (by origin) from this session.
     pub async fn forget_site(&mut self, domains: &[String], origins: &[String]) -> usize {
         let mut n = 0;
-        if let Ok(r) = self
-            .call(
-                "Storage.getCookies",
-                json!({ "browserContextId": self.browser_ctx }),
-            )
-            .await
-        {
+        if let Ok(r) = self.storage("Storage.getCookies", json!({})).await {
             for c in r["cookies"].as_array().cloned().unwrap_or_default() {
                 let d = c["domain"].as_str().unwrap_or("");
                 if domains.iter().any(|x| x == d) {
@@ -1013,13 +1004,7 @@ impl Session {
             return;
         }
         self.last_writeback = Instant::now();
-        let Ok(r) = self
-            .call(
-                "Storage.getCookies",
-                json!({ "browserContextId": self.browser_ctx }),
-            )
-            .await
-        else {
+        let Ok(r) = self.storage("Storage.getCookies", json!({})).await else {
             return;
         };
         let live: Vec<Value> = r["cookies"]
@@ -2504,11 +2489,7 @@ impl Session {
             }
             "cookies" => {
                 if a.pos.first().map(|s| s.as_str()) == Some("clear") {
-                    self.call(
-                        "Storage.clearCookies",
-                        json!({ "browserContextId": self.browser_ctx }),
-                    )
-                    .await?;
+                    self.storage("Storage.clearCookies", json!({})).await?;
                     return Ok("cookies cleared".into());
                 }
                 let r = self.call("Network.getCookies", json!({})).await?;
@@ -2548,12 +2529,7 @@ impl Session {
                 };
                 match sub {
                     "save" => {
-                        let r = self
-                            .call(
-                                "Storage.getCookies",
-                                json!({ "browserContextId": self.browser_ctx }),
-                            )
-                            .await?;
+                        let r = self.storage("Storage.getCookies", json!({})).await?;
                         let cookies: Vec<Value> = r["cookies"]
                             .as_array()
                             .map(|a| a.iter().map(crate::login::clean_cookie).collect())

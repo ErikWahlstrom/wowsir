@@ -869,6 +869,13 @@ impl Session {
         self.cdp.call(Some(&self.sid), method, params).await
     }
 
+    /// A Storage.* call for this session's whole browser context (all its cookies).
+    /// Chrome only takes `browserContextId` on the browser target, not on a page.
+    pub async fn storage(&self, method: &str, mut params: Value) -> Result<Value> {
+        params["browserContextId"] = json!(self.browser_ctx);
+        self.cdp.call(None, method, params).await
+    }
+
     async fn world(&mut self) -> Result<i64> {
         if let Some(id) = self.st.lock().unwrap().world {
             return Ok(id);

@@ -175,6 +175,8 @@ pub async fn run(url: &str, out: &Path, timeout: Duration) -> Result<usize> {
     let mut last: Vec<Value> = vec![];
     let mut seen_page = false;
     let mut seen_login = false;
+    // the pages the window went through, to explain afterwards why it closed when it did
+    let mut trail: Vec<String> = vec![];
     let mut origins: Vec<Value> = vec![];
     let save = |cookies: &Vec<Value>, origins: &Vec<Value>| -> Result<()> {
         let state = json!({
@@ -207,6 +209,11 @@ pub async fn run(url: &str, out: &Path, timeout: Duration) -> Result<usize> {
         if !urls.is_empty() {
             seen_page = true;
         }
+        for u in &urls {
+            if trail.last() != Some(u) && !u.starts_with("about:") {
+                trail.push(u.clone());
+            }
+        }
         if urls.iter().any(|u| looks_like_login(u)) {
             seen_login = true;
         }
@@ -220,7 +227,18 @@ pub async fn run(url: &str, out: &Path, timeout: Duration) -> Result<usize> {
                 && !u.contains("id_token=")
         }) {
             if seen_login {
-                let _ = home;
+                let shown: Vec<String> = trail
+                    .iter()
+                    .rev()
+                    .take(8)
+                    .rev()
+                    .map(|u| u.split(['?', '#']).next().unwrap_or(u).to_string())
+                    .collect();
+                eprintln!(
+                    "Signed in: passed a sign-in page and {home_host} loaded again ({}), so the window closed.\nPages seen: {}\nIf it closed too early, start at the site's sign-in URL instead.",
+                    home.split(['?', '#']).next().unwrap_or(home),
+                    shown.join(" → ")
+                );
                 tokio::time::sleep(Duration::from_millis(1500)).await; // let tokens/cookies land (MSAL writes storage after redirect)
                 if let Ok(r) = cdp.call(None, "Storage.getCookies", json!({})).await {
                     if let Some(a) = r["cookies"].as_array() {
